@@ -6,3 +6,19 @@ app/.pytest_cache/
 app/backend/__pycache__/
 app/backend/tests/__pycache__/
 *.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+.env
+.venv
+venv/
+__pycache__/
+*.py[cod]
