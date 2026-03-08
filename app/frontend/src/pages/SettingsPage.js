@@ -1,0 +1,223 @@
+import React, { useState, useEffect } from 'react';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import {
+  Settings,
+  Sparkles,
+  Key,
+  Shield,
+  Loader2,
+  Check,
+  AlertCircle,
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+export default function SettingsPage() {
+  const [aiSettings, setAiSettings] = useState({ use_default_key: true, has_custom_key: false });
+  const [customKey, setCustomKey] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await api.get('/settings/ai');
+      setAiSettings(response.data);
+    } catch (error) {
+      // Settings might not exist yet, that's ok
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveAISettings = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        use_default_key: aiSettings.use_default_key,
+        openai_api_key: !aiSettings.use_default_key && customKey ? customKey : null,
+      };
+      const response = await api.put('/settings/ai', payload);
+      setAiSettings(response.data);
+      setCustomKey('');
+      toast.success('AI settings saved');
+    } catch (error) {
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="settings-page">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold font-['Manrope']">Settings</h1>
+        <p className="text-muted-foreground mt-1">Configure your FitoutOS installation</p>
+      </div>
+
+      <Tabs defaultValue="ai" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="ai" className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            AI Configuration
+          </TabsTrigger>
+          <TabsTrigger value="general" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            General
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ai">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                AI Document Analysis
+              </CardTitle>
+              <CardDescription>
+                Configure how AI is used for document parsing and job setup assistance
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* API Key Configuration */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 rounded-lg border">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Key className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Use Emergent LLM Key (Default)</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Pay-as-you-go credits through Emergent. No subscription required.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={aiSettings.use_default_key}
+                    onCheckedChange={(checked) => setAiSettings({ ...aiSettings, use_default_key: checked })}
+                    data-testid="use-default-key"
+                  />
+                </div>
+
+                {!aiSettings.use_default_key && (
+                  <div className="p-4 rounded-lg border space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Custom OpenAI API Key</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Use your own OpenAI API key for document analysis. 
+                      Recommended for standalone deployments.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="api-key">API Key</Label>
+                      <Input
+                        id="api-key"
+                        type="password"
+                        value={customKey}
+                        onChange={(e) => setCustomKey(e.target.value)}
+                        placeholder="sk-..."
+                        data-testid="custom-api-key"
+                      />
+                      {aiSettings.has_custom_key && (
+                        <p className="text-sm text-green-600 flex items-center gap-1">
+                          <Check className="h-4 w-4" />
+                          Custom key is configured
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-medium text-blue-800 dark:text-blue-200">
+                        For Production / Resale
+                      </p>
+                      <p className="text-blue-700 dark:text-blue-300 mt-1">
+                        When deploying for customers, use "Custom API Key" mode so each 
+                        installation owner can provide their own OpenAI credentials.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button 
+                  onClick={handleSaveAISettings} 
+                  disabled={saving}
+                  data-testid="save-ai-settings"
+                >
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save AI Settings
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="general">
+          <Card>
+            <CardHeader>
+              <CardTitle>General Settings</CardTitle>
+              <CardDescription>
+                Configure general application preferences
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="text-center py-8 text-muted-foreground">
+                <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>General settings will be available in a future update</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* System Info */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">System Information</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="p-4 rounded-lg bg-muted/50">
+              <p className="text-sm text-muted-foreground">Application</p>
+              <p className="font-medium">FitoutOS v1.0.0</p>
+            </div>
+            <div className="p-4 rounded-lg bg-muted/50">
+              <p className="text-sm text-muted-foreground">AI Provider</p>
+              <p className="font-medium">
+                {aiSettings.use_default_key ? 'Emergent LLM (Gemini)' : 'Custom OpenAI'}
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-muted/50">
+              <p className="text-sm text-muted-foreground">Database</p>
+              <p className="font-medium">MongoDB</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
