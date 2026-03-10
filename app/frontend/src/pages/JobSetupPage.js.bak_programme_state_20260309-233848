@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -67,20 +66,6 @@ const ConfidenceBadge = ({ level }) => {
 };
 
 export default function JobSetupPage() {
-  const handleDeleteFile = async (fileId) => {
-    if (!window.confirm("Delete this file?")) return;
-    const targetJobId = jobId || job?.id;
-    if (!targetJobId) return;
-
-    try {
-      await api.delete(`/jobs/${targetJobId}/files/${fileId}`);
-      setFiles((prev) => prev.filter(f => (f._id || f.id || f.file_id) !== fileId));
-      toast.success('File deleted');
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to delete file');
-    }
-  };
-
   const { jobId } = useParams();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
@@ -91,31 +76,6 @@ export default function JobSetupPage() {
   const [job, setJob] = useState(null);
   const [files, setFiles] = useState([]);
   const [analysis, setAnalysis] = useState(null);
-  const [programmeItems, setProgrammeItems] = useState([]);
-  const updateProgrammeField = (index, field, value) => {
-    const updated = [...programmeItems];
-    updated[index] = { ...updated[index], [field]: value };
-    setProgrammeItems(updated);
-  };
-
-  const removeProgrammeItem = (index) => {
-    const updated = programmeItems.filter((_, i) => i !== index);
-    setProgrammeItems(updated);
-  };
-
-  const addProgrammeItem = () => {
-    const newItem = {
-      id: "prog-" + (programmeItems.length + 1).toString().padStart(3, "0"),
-      name: "",
-      phase: "",
-      trade: "",
-      duration: 1,
-      duration_unit: "days",
-      depends_on: [],
-      confidence: "manual"
-    };
-    setProgrammeItems([...programmeItems, newItem]);
-  };
   
   // Form data for new job
   const [jobForm, setJobForm] = useState({
@@ -162,12 +122,12 @@ export default function JobSetupPage() {
 
       // Check for existing analysis
       if (response.data.latest_analysis) {
-        setAnalysis(response.data.latest_analysis); setProgrammeItems(response.data.latest_analysis.proposed_programme || []); setCurrentStep(3); // Stay on upload step
+        setAnalysis(response.data.latest_analysis); setCurrentStep(3); // Stay on upload step
       } else {
         try {
           const analysisRes = await api.get(`/jobs/${jobId}/analysis`);
           if (analysisRes.data) {
-            setAnalysis(analysisRes.data.analysis); setProgrammeItems(analysisRes.data.analysis.proposed_programme || []); setCurrentStep(3); // Stay on upload step
+            setAnalysis(analysisRes.data.analysis); setCurrentStep(3); // Stay on upload step
           }
         } catch (e) {
           // No analysis yet
@@ -176,16 +136,7 @@ export default function JobSetupPage() {
     } catch (error) {
       toast.error('Failed to load job');
     }
-
   };
-
-  useEffect(() => {
-    if (analysis?.proposed_programme?.length > 0) {
-      setProgrammeItems(analysis.proposed_programme);
-    } else {
-      setProgrammeItems([]);
-    }
-  }, [analysis]);
 
   // File upload handling
   const onDrop = useCallback(async (acceptedFiles) => {
@@ -249,37 +200,21 @@ export default function JobSetupPage() {
   const handleAnalyze = async () => {
     const targetJobId = jobId || job?.id;
     if (!targetJobId) return;
-
+    
     setAnalyzing(true);
     try {
-      const analyzeRes = await api.post(`/jobs/${targetJobId}/analyze`);
-
-      const savedAnalysis = analyzeRes.data?.analysis || analyzeRes.data || (await api.get(`/jobs/${targetJobId}/analysis`)).data;
-
-      const hasUsableAnalysis = !!(
-        savedAnalysis && (
-          savedAnalysis.proposed_task_codes?.length ||
-          savedAnalysis.proposed_tasks?.length ||
-          savedAnalysis.scope_items?.length ||
-          savedAnalysis.proposed_programme?.length
-        )
-      );
-
-      if (!hasUsableAnalysis) {
-        toast.error('Analysis completed but no usable data was returned.');
-        return;
+      const response = await api.post(`/jobs/${targetJobId}/analyze`);
+      setAnalysis(response.data.analysis);
+      
+      // Pre-populate confirmed data
+      if (response.data.analysis) {
+        setConfirmedData({
+          task_codes: response.data.analysis.proposed_task_codes || [],
+          tasks: response.data.analysis.proposed_tasks || [],
+          scope_items: response.data.analysis.scope_items || [],
+        });
       }
-
-
-      setAnalysis(savedAnalysis);
-      setProgrammeItems(savedAnalysis?.proposed_programme || []);
-
-      setConfirmedData({
-        task_codes: savedAnalysis?.proposed_task_codes || [],
-        tasks: savedAnalysis?.proposed_tasks || [],
-        scope_items: savedAnalysis?.scope_items || [],
-      });
-
+      
       setCurrentStep(3);
       toast.success('Analysis complete! Review the results.');
     } catch (error) {
@@ -296,13 +231,7 @@ export default function JobSetupPage() {
     
     setLoading(true);
     try {
-      const payload = {
-  task_codes: confirmedData.task_codes?.length ? confirmedData.task_codes : (analysis?.proposed_task_codes || []),
-  tasks: confirmedData.tasks?.length ? confirmedData.tasks : (analysis?.proposed_tasks || []),
-  scope_items: confirmedData.scope_items?.length ? confirmedData.scope_items : (analysis?.scope_items || []),
-  programme: programmeItems
-};
-      await api.post(`/jobs/${targetJobId}/analysis/confirm`, payload);
+      await api.post(`/jobs/${targetJobId}/analysis/confirm`, confirmedData);
       toast.success('Job setup complete!');
       navigate(`/jobs/${targetJobId}`);
     } catch (error) {
@@ -453,35 +382,24 @@ export default function JobSetupPage() {
                 <h3 className="font-medium">Uploaded Files</h3>
                 {files.map((file, index) => (
                   <div key={index} className="flex items-center gap-3 p-3 rounded-lg border">
-                    
-  {file.filename?.endsWith('.pdf') ? (
+                    {file.filename?.endsWith('.pdf') ? (
                       <FileText className="h-5 w-5 text-red-500" />
                     ) : (
                       <FileSpreadsheet className="h-5 w-5 text-green-500" />
                     )}
                     <span className="flex-1 truncate">{file.filename}</span>
                     <CheckCircle className="h-5 w-5 text-green-500" />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteFile(file._id || file.id || file.file_id)}
-                      title="Delete file"
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 ))}
               </div>
             )}
 
             <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={() => setCurrentStep(0)} disabled={analyzing}>
+              <Button variant="outline" onClick={() => setCurrentStep(0)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button onClick={() => setCurrentStep(2)} data-testid="continue-to-analyze" disabled={analyzing}>
+              <Button onClick={() => setCurrentStep(2)} data-testid="continue-to-analyze">
                 Continue to Analysis
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -518,23 +436,11 @@ export default function JobSetupPage() {
             </div>
 
             <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={analyzing}>
+              <Button variant="outline" onClick={() => setCurrentStep(1)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button onClick={handleAnalyze} disabled={analyzing} data-testid="run-analysis-btn">
-                {analyzing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analyzing and saving results...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Run AI Analysis
-                  </>
-                )}
-              </Button>
+              <Button onClick={handleAnalyze} disabled={analyzing} data-testid="run-analysis-btn">{analyzing ? (<>`r`n                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />`r`n                    Analyzing...`r`n                  </>) : (<>`r`n                    <Sparkles className="mr-2 h-4 w-4" />`r`n                    Run AI Analysis`r`n                  </>)}</Button>
             </div>
           </CardContent>
         </Card>
@@ -550,34 +456,6 @@ export default function JobSetupPage() {
               </CardDescription>
             </CardHeader>
           </Card>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Scope Items</p>
-                <p className="text-2xl font-semibold">{analysis?.scope_items?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Tasks</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_tasks?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Task Codes</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_task_codes?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Programme</p>
-                <p className="text-2xl font-semibold">{(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length || 0}</p>
-              </CardContent>
-            </Card>
-          </div>
-
 
           <Tabs defaultValue="summary" className="space-y-4">
             <TabsList className="grid w-full grid-cols-5">
@@ -640,6 +518,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.scope_items.map((item, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.scope_items.includes(item)}
+                              onCheckedChange={(checked) => toggleItem('scope_items', item, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{typeof item === "string" ? item : item.item}</span>
@@ -648,7 +530,7 @@ export default function JobSetupPage() {
                               {item.quantity && (
                                 <p className="text-sm text-muted-foreground">
                                   {item.quantity} {item.unit}
-                                  {item.quoted_hours && ` • ${item.quoted_hours}h quoted`}
+                                  {item.quoted_hours && ` â€¢ ${item.quoted_hours}h quoted`}
                                 </p>
                               )}
                             </div>
@@ -673,6 +555,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.proposed_tasks.map((task, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.tasks.includes(task)}
+                              onCheckedChange={(checked) => toggleItem('tasks', task, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{typeof task === "string" ? task : (task.name || task.task || "Unnamed task")}</span>
@@ -713,6 +599,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.proposed_task_codes.map((code, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.task_codes.includes(code)}
+                              onCheckedChange={(checked) => toggleItem('task_codes', code, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <span className="font-mono font-bold">{typeof code === "string" ? code : code.code}</span>
                               {code.reason && (
@@ -732,91 +622,49 @@ export default function JobSetupPage() {
               </Card>
             </TabsContent>
             <TabsContent value="programme">
-  <Card>
-    <CardContent className="pt-6">
-      <div className="flex justify-end mb-3">
-        <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Programme Item
-        </Button>
-      </div>
+              <Card>
+                <CardContent className="pt-6">
+                  <ScrollArea className="h-[400px]">
+                    {analysis.proposed_programme?.length > 0 ? (
+                      <div className="space-y-2">
+                        {analysis.proposed_programme.map((item, index) => (
+                          <div key={index} className="p-3 rounded-lg border space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="font-medium">
+                                {index + 1}. {item.name || "Unnamed programme item"}
+                              </div>
+                              {item.confidence && (
+                                <ConfidenceBadge level={item.confidence} />
+                              )}
+                            </div>
 
-      <ScrollArea className="h-[400px]">
-        {(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length > 0 ? (
-          <div className="space-y-3">
-            {(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).map((item, index) => (
-              <div key={index} className="p-3 rounded-lg border space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">{index + 1}.</div>
-                  <div className="flex items-center gap-2">
-                    {item.confidence && item.confidence !== "manual" ? (
-                      <ConfidenceBadge level={item.confidence} />
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeProgrammeItem(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                            <div className="text-sm text-muted-foreground">
+                              {item.phase}
+                              {item.trade && ` • ${item.trade}`}
+                              {item.duration && ` • ${item.duration} ${item.duration_unit}`}
+                            </div>
 
-                <Input
-                  value={item.name || ""}
-                  onChange={(e) => updateProgrammeField(index, "name", e.target.value)}
-                  placeholder="Programme task name"
-                />
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <Input
-                    value={item.phase || ""}
-                    onChange={(e) => updateProgrammeField(index, "phase", e.target.value)}
-                    placeholder="Phase"
-                  />
-                  <Input
-                    value={item.trade || ""}
-                    onChange={(e) => updateProgrammeField(index, "trade", e.target.value)}
-                    placeholder="Trade"
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={item.duration ?? ""}
-                      onChange={(e) => updateProgrammeField(index, "duration", e.target.value)}
-                      placeholder="Duration"
-                    />
-                    <Input
-                      value={item.duration_unit || "days"}
-                      onChange={(e) => updateProgrammeField(index, "duration_unit", e.target.value)}
-                      placeholder="Unit"
-                    />
-                  </div>
-                </div>
-
-                <Input
-                  value={Array.isArray(item.depends_on) ? item.depends_on.join(", ") : ""}
-                  onChange={(e) => updateProgrammeField(index, "depends_on", e.target.value.split(",").map(x => x.trim()).filter(Boolean))}
-                  placeholder="Depends on (comma separated ids)"
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-center py-8">
-            No programme generated
-          </p>
-        )}
-      </ScrollArea>
-    </CardContent>
-  </Card>
-</TabsContent>
+                            {item.depends_on?.length > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                Depends on: {item.depends_on.join(", ")}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-center py-8">
+                        No programme generated
+                      </p>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
 
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={analyzing}>
+            <Button variant="outline" onClick={() => setCurrentStep(2)}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Re-analyze
             </Button>
@@ -831,43 +679,6 @@ export default function JobSetupPage() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -1245,12 +1245,9 @@ async def confirm_job_analysis(
     await db.job_programme.delete_many({"job_id": job_id})
     await db.job_task_codes.delete_many({"job_id": job_id})
     await db.scope_items.delete_many({"job_id": job_id})
-    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
-
-    
+    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
     # Save confirmed programme
     if "programme" in confirmed_data:
-        await db.job_programme.delete_many({"job_id": job_id})
 
         for item in confirmed_data["programme"]:
             programme_row = {
@@ -1717,6 +1714,7 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
 
 
 

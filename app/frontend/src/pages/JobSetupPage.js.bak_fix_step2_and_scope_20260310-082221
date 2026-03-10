@@ -68,13 +68,12 @@ const ConfidenceBadge = ({ level }) => {
 
 export default function JobSetupPage() {
   const handleDeleteFile = async (fileId) => {
-    if (!window.confirm("Delete this file?")) return;
     const targetJobId = jobId || job?.id;
     if (!targetJobId) return;
 
     try {
       await api.delete(`/jobs/${targetJobId}/files/${fileId}`);
-      setFiles((prev) => prev.filter(f => (f._id || f.id || f.file_id) !== fileId));
+      setFiles((prev) => prev.filter(f => (f._id || f.id) !== fileId));
       toast.success('File deleted');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete file');
@@ -176,7 +175,6 @@ export default function JobSetupPage() {
     } catch (error) {
       toast.error('Failed to load job');
     }
-
   };
 
   useEffect(() => {
@@ -249,37 +247,21 @@ export default function JobSetupPage() {
   const handleAnalyze = async () => {
     const targetJobId = jobId || job?.id;
     if (!targetJobId) return;
-
+    
     setAnalyzing(true);
     try {
-      const analyzeRes = await api.post(`/jobs/${targetJobId}/analyze`);
-
-      const savedAnalysis = analyzeRes.data?.analysis || analyzeRes.data || (await api.get(`/jobs/${targetJobId}/analysis`)).data;
-
-      const hasUsableAnalysis = !!(
-        savedAnalysis && (
-          savedAnalysis.proposed_task_codes?.length ||
-          savedAnalysis.proposed_tasks?.length ||
-          savedAnalysis.scope_items?.length ||
-          savedAnalysis.proposed_programme?.length
-        )
-      );
-
-      if (!hasUsableAnalysis) {
-        toast.error('Analysis completed but no usable data was returned.');
-        return;
+      const response = await api.post(`/jobs/${targetJobId}/analyze`);
+      setAnalysis(response.data.analysis);
+      
+      // Pre-populate confirmed data
+      if (response.data.analysis) {
+        setConfirmedData({
+          task_codes: response.data.analysis.proposed_task_codes || [],
+          tasks: response.data.analysis.proposed_tasks || [],
+          scope_items: response.data.analysis.scope_items || [],
+        });
       }
-
-
-      setAnalysis(savedAnalysis);
-      setProgrammeItems(savedAnalysis?.proposed_programme || []);
-
-      setConfirmedData({
-        task_codes: savedAnalysis?.proposed_task_codes || [],
-        tasks: savedAnalysis?.proposed_tasks || [],
-        scope_items: savedAnalysis?.scope_items || [],
-      });
-
+      
       setCurrentStep(3);
       toast.success('Analysis complete! Review the results.');
     } catch (error) {
@@ -297,11 +279,9 @@ export default function JobSetupPage() {
     setLoading(true);
     try {
       const payload = {
-  task_codes: confirmedData.task_codes?.length ? confirmedData.task_codes : (analysis?.proposed_task_codes || []),
-  tasks: confirmedData.tasks?.length ? confirmedData.tasks : (analysis?.proposed_tasks || []),
-  scope_items: confirmedData.scope_items?.length ? confirmedData.scope_items : (analysis?.scope_items || []),
-  programme: programmeItems
-};
+        ...confirmedData,
+        programme: programmeItems
+      };
       await api.post(`/jobs/${targetJobId}/analysis/confirm`, payload);
       toast.success('Job setup complete!');
       navigate(`/jobs/${targetJobId}`);
@@ -329,7 +309,6 @@ export default function JobSetupPage() {
         <Link to={jobId ? `/jobs/${jobId}` : '/jobs'}>
           <Button variant="ghost" size="icon">
             <ArrowLeft className="h-5 w-5" />
-          </Button>
         </Link>
         <div>
           <h1 className="text-2xl font-bold font-['Manrope']">
@@ -416,7 +395,6 @@ export default function JobSetupPage() {
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create Job & Continue
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
             </div>
           </CardContent>
         </Card>
@@ -461,27 +439,17 @@ export default function JobSetupPage() {
                     )}
                     <span className="flex-1 truncate">{file.filename}</span>
                     <CheckCircle className="h-5 w-5 text-green-500" />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteFile(file._id || file.id || file.file_id)}
-                      title="Delete file"
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 ))}
               </div>
             )}
 
             <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={() => setCurrentStep(0)} disabled={analyzing}>
+              <Button variant="outline" onClick={() => setCurrentStep(0)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
-              <Button onClick={() => setCurrentStep(2)} data-testid="continue-to-analyze" disabled={analyzing}>
+              <Button onClick={() => setCurrentStep(2)} data-testid="continue-to-analyze">
                 Continue to Analysis
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -518,23 +486,10 @@ export default function JobSetupPage() {
             </div>
 
             <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={analyzing}>
+              <Button variant="outline" onClick={() => setCurrentStep(1)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
-              </Button>
-              <Button onClick={handleAnalyze} disabled={analyzing} data-testid="run-analysis-btn">
-                {analyzing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analyzing and saving results...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Run AI Analysis
-                  </>
-                )}
-              </Button>
+              <Button onClick={handleAnalyze} disabled={analyzing} data-testid="run-analysis-btn">{analyzing ? (<>`r`n                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />`r`n                    Analyzing...`r`n                  </>) : (<>`r`n                    <Sparkles className="mr-2 h-4 w-4" />`r`n                    Run AI Analysis`r`n                  </>)}</Button>
             </div>
           </CardContent>
         </Card>
@@ -550,34 +505,6 @@ export default function JobSetupPage() {
               </CardDescription>
             </CardHeader>
           </Card>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Scope Items</p>
-                <p className="text-2xl font-semibold">{analysis?.scope_items?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Tasks</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_tasks?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Task Codes</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_task_codes?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Programme</p>
-                <p className="text-2xl font-semibold">{(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length || 0}</p>
-              </CardContent>
-            </Card>
-          </div>
-
 
           <Tabs defaultValue="summary" className="space-y-4">
             <TabsList className="grid w-full grid-cols-5">
@@ -640,15 +567,18 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.scope_items.map((item, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.scope_items.includes(item)}
+                              onCheckedChange={(checked) => toggleItem('scope_items', item, checked)}
+                            />
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
                                 <span className="font-medium">{typeof item === "string" ? item : item.item}</span>
                                 {typeof item === "object" && item.confidence ? <ConfidenceBadge level={item.confidence} /> : null}
                               </div>
                               {item.quantity && (
                                 <p className="text-sm text-muted-foreground">
                                   {item.quantity} {item.unit}
-                                  {item.quoted_hours && ` • ${item.quoted_hours}h quoted`}
+                                  {item.quoted_hours && ` â€¢ ${item.quoted_hours}h quoted`}
                                 </p>
                               )}
                             </div>
@@ -673,6 +603,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.proposed_tasks.map((task, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.tasks.includes(task)}
+                              onCheckedChange={(checked) => toggleItem('tasks', task, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{typeof task === "string" ? task : (task.name || task.task || "Unnamed task")}</span>
@@ -713,6 +647,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.proposed_task_codes.map((code, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.task_codes.includes(code)}
+                              onCheckedChange={(checked) => toggleItem('task_codes', code, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <span className="font-mono font-bold">{typeof code === "string" ? code : code.code}</span>
                               {code.reason && (
@@ -738,7 +676,6 @@ export default function JobSetupPage() {
         <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
           <Plus className="mr-2 h-4 w-4" />
           Add Programme Item
-        </Button>
       </div>
 
       <ScrollArea className="h-[400px]">
@@ -759,7 +696,6 @@ export default function JobSetupPage() {
                       onClick={() => removeProgrammeItem(index)}
                     >
                       <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
 
@@ -816,42 +752,19 @@ export default function JobSetupPage() {
           </Tabs>
 
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={analyzing}>
+            <Button variant="outline" onClick={() => setCurrentStep(2)}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Re-analyze
-            </Button>
             <Button onClick={handleConfirm} disabled={loading} data-testid="confirm-setup-btn">
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Check className="mr-2 h-4 w-4" />
               Confirm & Save
-            </Button>
           </div>
         </div>
       )}
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

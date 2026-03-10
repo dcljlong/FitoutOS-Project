@@ -1240,13 +1240,6 @@ async def confirm_job_analysis(
         "materials": 0,
         "scope_items": 0
     }
-
-    # Clear previously confirmed/generated data for this job to prevent duplication on re-confirm
-    await db.job_programme.delete_many({"job_id": job_id})
-    await db.job_task_codes.delete_many({"job_id": job_id})
-    await db.scope_items.delete_many({"job_id": job_id})
-    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
-
     
     # Save confirmed programme
     if "programme" in confirmed_data:
@@ -1273,19 +1266,6 @@ async def confirm_job_analysis(
             if isinstance(code_data, str):
                 code_data = {"code": code_data}
             master_code = await db.master_task_codes.find_one({"code": code_data["code"]})
-            if not master_code:
-                master_code = {
-                    "id": str(uuid.uuid4()),
-                    "code": code_data["code"],
-                    "name": code_data.get("name") or code_data["code"].replace("-", " ").replace("_", " ").title(),
-                    "description": code_data.get("reason"),
-                    "trade": code_data.get("trade"),
-                    "phase": code_data.get("phase"),
-                    "is_global_fallback": False,
-                    "is_active": True,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                await db.master_task_codes.insert_one(master_code)
             if master_code:
                 existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code["id"]})
                 if not existing:

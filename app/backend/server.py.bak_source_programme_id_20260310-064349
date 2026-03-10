@@ -176,7 +176,6 @@ class TaskResponse(BaseModel):
     quoted_hours: Optional[float] = None
     actual_hours: float = 0
     percent_complete: int
-    is_critical: bool = False
     created_at: str
 
 class TimesheetRowCreate(BaseModel):
@@ -1007,27 +1006,6 @@ async def upload_job_files(
     
     return {"message": f"Uploaded {len(uploaded_files)} files", "files": uploaded_files}
 
-@api_router.delete("/jobs/{job_id}/files/{file_id}")
-async def delete_job_file(
-    job_id: str,
-    file_id: str,
-    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
-):
-    file_record = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
-    if not file_record:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    filepath = file_record.get("filepath")
-    if filepath and os.path.exists(filepath):
-        try:
-            os.remove(filepath)
-        except Exception:
-            pass
-
-    await db.job_files.delete_one({"job_id": job_id, "id": file_id})
-
-    return {"message": "File deleted"}
-
 @api_router.get("/jobs/{job_id}/files")
 async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
     files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
@@ -1240,13 +1218,6 @@ async def confirm_job_analysis(
         "materials": 0,
         "scope_items": 0
     }
-
-    # Clear previously confirmed/generated data for this job to prevent duplication on re-confirm
-    await db.job_programme.delete_many({"job_id": job_id})
-    await db.job_task_codes.delete_many({"job_id": job_id})
-    await db.scope_items.delete_many({"job_id": job_id})
-    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
-
     
     # Save confirmed programme
     if "programme" in confirmed_data:
@@ -1270,22 +1241,7 @@ async def confirm_job_analysis(
     # Process confirmed task codes
     if "task_codes" in confirmed_data:
         for code_data in confirmed_data["task_codes"]:
-            if isinstance(code_data, str):
-                code_data = {"code": code_data}
             master_code = await db.master_task_codes.find_one({"code": code_data["code"]})
-            if not master_code:
-                master_code = {
-                    "id": str(uuid.uuid4()),
-                    "code": code_data["code"],
-                    "name": code_data.get("name") or code_data["code"].replace("-", " ").replace("_", " ").title(),
-                    "description": code_data.get("reason"),
-                    "trade": code_data.get("trade"),
-                    "phase": code_data.get("phase"),
-                    "is_global_fallback": False,
-                    "is_active": True,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                await db.master_task_codes.insert_one(master_code)
             if master_code:
                 existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code["id"]})
                 if not existing:
@@ -1334,8 +1290,6 @@ async def confirm_job_analysis(
     # Process scope items
     if "scope_items" in confirmed_data:
         for scope_data in confirmed_data["scope_items"]:
-            if isinstance(scope_data, str):
-                scope_data = {"item": scope_data}
             scope_item = {
                 "id": str(uuid.uuid4()),
                 "job_id": job_id,
@@ -1374,28 +1328,14 @@ async def generate_tasks_from_programme(
     if not programme:
         raise HTTPException(status_code=404, detail="No programme found for this job")
 
-    existing_generated_tasks = await db.tasks.find(
-        {"job_id": job_id, "source_programme_id": {"$exists": True}},
-        {"_id": 0}
-    ).to_list(1000)
-
-    existing_by_source = {
-        t.get("source_programme_id"): t
-        for t in existing_generated_tasks
-        if t.get("source_programme_id")
-    }
+    await db.tasks.delete_many({"job_id": job_id})
 
     created_tasks = []
     programme_id_to_task_id = {}
-    seen_programme_ids = set()
 
     for item in programme:
-        source_programme_id = item.get("id")
-        seen_programme_ids.add(source_programme_id)
-
-        existing_task = existing_by_source.get(source_programme_id)
-        task_id = existing_task["id"] if existing_task else str(uuid.uuid4())
-        programme_id_to_task_id[source_programme_id] = task_id
+        task_id = str(uuid.uuid4())
+        programme_id_to_task_id[item["id"]] = task_id
 
         duration_value = item.get("duration")
         try:
@@ -1403,140 +1343,43 @@ async def generate_tasks_from_programme(
         except Exception:
             duration_days = None
 
-        task_data = {
+        task = {
+            "id": task_id,
             "job_id": job_id,
             "task_name": item.get("name", "Unnamed Task"),
-            "source_programme_id": source_programme_id,
             "task_type": item.get("phase"),
-            "linked_task_codes": existing_task.get("linked_task_codes", []) if existing_task else [],
-            "planned_start": existing_task.get("planned_start") if existing_task else None,
-            "planned_finish": existing_task.get("planned_finish") if existing_task else None,
+            "linked_task_codes": [],
+            "planned_start": None,
+            "planned_finish": None,
             "duration_days": duration_days,
             "predecessor_ids": [],
             "owner_party": item.get("trade"),
-            "is_internal": existing_task.get("is_internal", True) if existing_task else True,
-            "subcontractor_id": existing_task.get("subcontractor_id") if existing_task else None,
-            "zone_area": existing_task.get("zone_area") if existing_task else None,
-            "status": existing_task.get("status", "planned") if existing_task else "planned",
-            "blockers": existing_task.get("blockers") if existing_task else None,
-            "notes": existing_task.get("notes") if existing_task else f"Generated from programme item {source_programme_id}",
-            "quoted_hours": existing_task.get("quoted_hours") if existing_task else None,
-            "actual_hours": existing_task.get("actual_hours", 0) if existing_task else 0,
-            "percent_complete": existing_task.get("percent_complete", 0) if existing_task else 0,
-            "is_critical": False,
+            "is_internal": True,
+            "subcontractor_id": None,
+            "zone_area": None,
+            "status": "planned",
+            "blockers": None,
+            "notes": f"Generated from programme item {item.get('id')}",
+            "quoted_hours": None,
+            "actual_hours": 0,
+            "percent_complete": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["id"]
         }
+        created_tasks.append(task)
 
-        if existing_task:
-            await db.tasks.update_one(
-                {"id": task_id},
-                {"$set": task_data}
-            )
-        else:
-            task = {
-                "id": task_id,
-                **task_data,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "created_by": user["id"]
-            }
-            created_tasks.append(task)
-
-    for source_programme_id, task_id in programme_id_to_task_id.items():
+    for task in created_tasks:
+        source_programme_id = next((k for k, v in programme_id_to_task_id.items() if v == task["id"]), None)
         source_item = next((p for p in programme if p["id"] == source_programme_id), None)
         if source_item:
-            predecessor_ids = [
+            task["predecessor_ids"] = [
                 programme_id_to_task_id[dep_id]
                 for dep_id in source_item.get("depends_on", [])
                 if dep_id in programme_id_to_task_id
             ]
-            await db.tasks.update_one(
-                {"id": task_id},
-                {"$set": {"predecessor_ids": predecessor_ids}}
-            )
 
-    obsolete_ids = [
-        t["id"] for t in existing_generated_tasks
-        if t.get("source_programme_id") not in seen_programme_ids
-    ]
-    if obsolete_ids:
-        await db.tasks.delete_many({"id": {"$in": obsolete_ids}})
     if created_tasks:
         await db.tasks.insert_many(created_tasks)
-
-    all_generated_tasks = await db.tasks.find(
-        {"job_id": job_id, "source_programme_id": {"$exists": True}},
-        {"_id": 0}
-    ).to_list(1000)
-
-    task_map = {t["id"]: t for t in all_generated_tasks}
-    successors = {}
-    for t in all_generated_tasks:
-        for pred in t.get("predecessor_ids", []):
-            if pred not in successors:
-                successors[pred] = []
-            successors[pred].append(t["id"])
-
-    longest_to = {}
-
-    def get_duration(task):
-        try:
-            return int(task.get("duration_days") or 1)
-        except Exception:
-            return 1
-
-    def calc_longest(task_id):
-        if task_id in longest_to:
-            return longest_to[task_id]
-
-        task = task_map[task_id]
-        preds = task.get("predecessor_ids", [])
-        if not preds:
-            longest_to[task_id] = get_duration(task)
-        else:
-            longest_to[task_id] = max(calc_longest(pred) for pred in preds) + get_duration(task)
-        return longest_to[task_id]
-
-    for task_id in task_map.keys():
-        calc_longest(task_id)
-
-    if job.get("planned_start"):
-        try:
-            project_start = datetime.fromisoformat(job["planned_start"])
-        except Exception:
-            project_start = None
-    else:
-        project_start = None
-
-    if project_start:
-        for task_id, task in task_map.items():
-            preds = task.get("predecessor_ids", [])
-            if preds:
-                start_offset = max(longest_to.get(pred, 0) for pred in preds)
-            else:
-                start_offset = 0
-
-            duration_days = get_duration(task)
-            planned_start = (project_start + timedelta(days=start_offset)).date().isoformat()
-            planned_finish = (project_start + timedelta(days=max(start_offset + duration_days - 1, start_offset))).date().isoformat()
-
-            await db.tasks.update_one(
-                {"id": task_id},
-                {"$set": {
-                    "planned_start": planned_start,
-                    "planned_finish": planned_finish
-                }}
-            )
-
-    if longest_to:
-        max_path = max(longest_to.values())
-        critical_ids = {task_id for task_id, total in longest_to.items() if total == max_path}
-        await db.tasks.update_many(
-            {"job_id": job_id, "source_programme_id": {"$exists": True}},
-            {"$set": {"is_critical": False}}
-        )
-        await db.tasks.update_many(
-            {"id": {"$in": list(critical_ids)}},
-            {"$set": {"is_critical": True}}
-        )
 
     return {
         "message": "Tasks generated from programme",
@@ -1717,13 +1560,6 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
-
-
-
-
-
-
 
 
 

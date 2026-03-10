@@ -723,9 +723,6 @@ export default function JobDetailPage() {
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-medium truncate">{task.task_name}</h3>
                           {getStatusBadge(task.status)}
-                          {task.is_critical && (
-                            <Badge variant="destructive" className="text-xs">Critical</Badge>
-                          )}
                           {task.is_internal ? (
                             <Badge variant="outline" className="text-xs">Internal</Badge>
                           ) : (
@@ -1510,8 +1507,6 @@ export default function JobDetailPage() {
     </div>
   );
 }
-
-
 
 
 

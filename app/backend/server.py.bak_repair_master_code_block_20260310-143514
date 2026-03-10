@@ -1245,12 +1245,9 @@ async def confirm_job_analysis(
     await db.job_programme.delete_many({"job_id": job_id})
     await db.job_task_codes.delete_many({"job_id": job_id})
     await db.scope_items.delete_many({"job_id": job_id})
-    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
-
-    
+    await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
     # Save confirmed programme
     if "programme" in confirmed_data:
-        await db.job_programme.delete_many({"job_id": job_id})
 
         for item in confirmed_data["programme"]:
             programme_row = {
@@ -1278,9 +1275,7 @@ async def confirm_job_analysis(
                     "id": str(uuid.uuid4()),
                     "code": code_data["code"],
                     "name": code_data.get("name") or code_data["code"].replace("-", " ").replace("_", " ").title(),
-                    "description": code_data.get("reason"),
-                    "trade": code_data.get("trade"),
-                    "phase": code_data.get("phase"),
+                    "description": code_data.get("reason"),`r`n                    "category": code_data.get("trade") or code_data.get("phase") or "AI Generated",
                     "is_global_fallback": False,
                     "is_active": True,
                     "created_at": datetime.now(timezone.utc).isoformat()
@@ -1717,6 +1712,8 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
 
 
 

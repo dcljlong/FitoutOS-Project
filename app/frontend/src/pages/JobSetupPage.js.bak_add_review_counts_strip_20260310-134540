@@ -551,34 +551,6 @@ export default function JobSetupPage() {
             </CardHeader>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Scope Items</p>
-                <p className="text-2xl font-semibold">{analysis?.scope_items?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Tasks</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_tasks?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Task Codes</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_task_codes?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Programme</p>
-                <p className="text-2xl font-semibold">{(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length || 0}</p>
-              </CardContent>
-            </Card>
-          </div>
-
-
           <Tabs defaultValue="summary" className="space-y-4">
             <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="summary">Summary</TabsTrigger>

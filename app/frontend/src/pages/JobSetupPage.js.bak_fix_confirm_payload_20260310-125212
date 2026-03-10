@@ -297,11 +297,9 @@ export default function JobSetupPage() {
     setLoading(true);
     try {
       const payload = {
-  task_codes: confirmedData.task_codes?.length ? confirmedData.task_codes : (analysis?.proposed_task_codes || []),
-  tasks: confirmedData.tasks?.length ? confirmedData.tasks : (analysis?.proposed_tasks || []),
-  scope_items: confirmedData.scope_items?.length ? confirmedData.scope_items : (analysis?.scope_items || []),
-  programme: programmeItems
-};
+        ...confirmedData,
+        programme: programmeItems
+      };
       await api.post(`/jobs/${targetJobId}/analysis/confirm`, payload);
       toast.success('Job setup complete!');
       navigate(`/jobs/${targetJobId}`);
@@ -551,34 +549,6 @@ export default function JobSetupPage() {
             </CardHeader>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Scope Items</p>
-                <p className="text-2xl font-semibold">{analysis?.scope_items?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Tasks</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_tasks?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Task Codes</p>
-                <p className="text-2xl font-semibold">{analysis?.proposed_task_codes?.length || 0}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-xs text-muted-foreground">Programme</p>
-                <p className="text-2xl font-semibold">{(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length || 0}</p>
-              </CardContent>
-            </Card>
-          </div>
-
-
           <Tabs defaultValue="summary" className="space-y-4">
             <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -640,6 +610,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.scope_items.map((item, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.scope_items.includes(item)}
+                              onCheckedChange={(checked) => toggleItem("scope_items", item, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{typeof item === "string" ? item : item.item}</span>
@@ -713,6 +687,10 @@ export default function JobSetupPage() {
                       <div className="space-y-2">
                         {analysis.proposed_task_codes.map((code, index) => (
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
+                            <Checkbox
+                              checked={confirmedData.task_codes.includes(code)}
+                              onCheckedChange={(checked) => toggleItem('task_codes', code, checked)}
+                            />
                             <div className="flex-1 min-w-0">
                               <span className="font-mono font-bold">{typeof code === "string" ? code : code.code}</span>
                               {code.reason && (
@@ -831,9 +809,6 @@ export default function JobSetupPage() {
     </div>
   );
 }
-
-
-
 
 
 
