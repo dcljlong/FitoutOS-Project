@@ -1,0 +1,193 @@
+{
+  "programme": [
+    {
+      "id": "prog-001",
+      "name": "Install steel stud framing for IT walls and partitions",
+      "phase": "Construction",
+      "trade": "Steel Stud Framing",
+      "duration": 15,
+      "duration_unit": "days",
+      "depends_on": [],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-002",
+      "name": "Install steel stud framing between steel purlins",
+      "phase": "Construction",
+      "trade": "Steel Stud Framing",
+      "duration": 7,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-001"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-003",
+      "name": "Install wall linings to IT and exterior walls",
+      "phase": "Construction",
+      "trade": "Wall Linings",
+      "duration": 20,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-002"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-004",
+      "name": "Install wall linings to toilet walls and ceilings",
+      "phase": "Construction",
+      "trade": "Wall Linings",
+      "duration": 5,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-003"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-005",
+      "name": "Apply wall stopping and finishing to IT and exterior walls",
+      "phase": "Construction",
+      "trade": "Wall Stopping",
+      "duration": 14,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-003"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-006",
+      "name": "Apply stopping to toilet walls and ceilings",
+      "phase": "Construction",
+      "trade": "Wall Stopping",
+      "duration": 3,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-004"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-007",
+      "name": "Install steel furring channel ceiling framing to toilets",
+      "phase": "Construction",
+      "trade": "Ceilings",
+      "duration": 2,
+      "duration_unit": "days",
+      "depends_on": [],
+      "confidence": "high"
+    },
+    {
+      "id": "prog-008",
+      "name": "Supply and install specified insulation to walls",
+      "phase": "Construction",
+      "trade": "Insulation",
+      "duration": 15,
+      "duration_unit": "days",
+      "depends_on": [
+        "prog-001"
+      ],
+      "confidence": "high"
+    }
+  ],
+  "task_codes": [
+    "TS-001",
+    "TS-002",
+    "TS-003",
+    "WL-001",
+    "WL-002",
+    "ST-001",
+    "ST-002",
+    "CL-001",
+    "IN-001"
+  ],
+  "tasks": [
+    {
+      "name": "Install steel stud framing for IT walls and partitions",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 15,
+      "suggested_codes": []
+    },
+    {
+      "name": "Install steel stud framing between steel purlins",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 7,
+      "suggested_codes": []
+    },
+    {
+      "name": "Install wall linings to IT and exterior walls",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 20,
+      "suggested_codes": []
+    },
+    {
+      "name": "Install wall linings to toilet walls and ceilings",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 5,
+      "suggested_codes": []
+    },
+    {
+      "name": "Apply wall stopping and finishing to IT and exterior walls",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 14,
+      "suggested_codes": []
+    },
+    {
+      "name": "Apply stopping to toilet walls and ceilings",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 3,
+      "suggested_codes": []
+    },
+    {
+      "name": "Install steel furring channel ceiling framing to toilets",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 2,
+      "suggested_codes": []
+    },
+    {
+      "name": "Supply and install specified insulation to walls",
+      "type": "Construction",
+      "planned_start": null,
+      "planned_finish": null,
+      "duration_days": 15,
+      "suggested_codes": []
+    }
+  ],
+  "scope_items": [
+    {
+      "item": "Steel stud framing for IT walls and partitions (up to purlins, including boxing stud to underside)"
+    },
+    {
+      "item": "Steel stud framing between steel purlins"
+    },
+    {
+      "item": "Installation of wall linings for IT walls, exterior walls, and toilets (Standard, Aqualine, Fyrelines as required)"
+    },
+    {
+      "item": "Wall stopping to IT walls, exterior walls, and toilets with level 4 finish"
+    },
+    {
+      "item": "Installation of steel furring channel ceiling framing in toilets (concealed grid direct fix ceilings)"
+    },
+    {
+      "item": "Supply and installation of specified insulation products (Autex/GreenStuf) at walls"
+    }
+  ]
+}
