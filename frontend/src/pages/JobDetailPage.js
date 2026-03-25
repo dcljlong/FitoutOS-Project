@@ -166,12 +166,12 @@ export default function JobDetailPage() {
       const jobRes = await api.get(`/jobs/${jobId}`);
       const tasksRes = await api.get(`/tasks?job_id=${jobId}`);
       const codesRes = await api.get(`/jobs/${jobId}/task-codes`);
-      let subsRes = { data: [] }; try { subsRes = await api.get('/subcontractors'); } catch (e) { console.log('subcontractors failed'); }
+      let subsRes = { data: [] }; try { subsRes = await api.get('/subcontractors'); } catch (e) { /* subcontractors endpoint optional */ }
       const delaysRes = await api.get(`/delays?job_id=${jobId}`);
       const programmeRes = await api.get(`/jobs/${jobId}/programme`);
 
       setJob(jobRes.data);
-      console.log('TASKS RAW', { jobId, tasks: tasksRes.data }); setTasks(tasksRes.data?.value || tasksRes.data || []);
+      setTasks(tasksRes.data?.value || tasksRes.data || []);
       setTaskCodes(codesRes.data);
       setSubcontractors(subsRes.data);
       setDelays(delaysRes.data);
