@@ -1,0 +1,35 @@
+app/frontend/node_modules/
+app/frontend/build/
+app/backend/.env
+app/frontend/.env
+app/.pytest_cache/
+app/backend/__pycache__/
+app/backend/tests/__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+.env
+.venv
+venv/
+__pycache__/
+*.py[cod]
+-e 
+# Environment files
+*.env
+*.env.*
+-e 
+# Environment files
+*.env
+*.env.*
+frontend/node_modules/.cache/default-development/0.pack
+frontend/node_modules/.cache/default-development/1.pack
+frontend/node_modules/.cache/default-development/2.pack

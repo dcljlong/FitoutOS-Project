@@ -1,0 +1,6 @@
+Task ID,Task Name,Start Date,Finish Date,Duration,Predecessor
+T001,Wall Framing,2026-01-15,2026-01-19,5,
+T002,Wall Linings,2026-01-20,2026-01-26,5,T001
+,,,,,
+T003,Stopping,2026-01-27,2026-02-02,5,T002
+T004,Ceiling Framing,2026-01-22,2026-01-28,5,T001

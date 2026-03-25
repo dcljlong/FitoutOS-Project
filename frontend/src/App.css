@@ -1,0 +1,209 @@
+/* App-specific styles */
+
+/* Sidebar */
+.sidebar {
+    @apply fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-40;
+    @apply transform transition-transform duration-200 ease-in-out;
+}
+
+.sidebar.collapsed {
+    @apply -translate-x-full md:translate-x-0 md:w-16;
+}
+
+/* Main content area */
+.main-content {
+    @apply min-h-screen;
+    margin-left: 0;
+}
+
+@media (min-width: 768px) {
+    .main-content {
+        margin-left: 256px;
+    }
+    
+    .sidebar.collapsed + .main-content {
+        margin-left: 64px;
+    }
+}
+
+/* Mobile bottom nav */
+.mobile-nav {
+    @apply fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50;
+    @apply flex items-center justify-around py-2 md:hidden;
+}
+
+/* Page header */
+.page-header {
+    @apply sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60;
+    @apply border-b border-border px-4 md:px-8 py-4;
+}
+
+/* Dashboard grid */
+.dashboard-grid {
+    @apply grid gap-4 md:gap-6;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* Metric card */
+.metric-card {
+    @apply relative overflow-hidden rounded-lg border bg-card p-6;
+    @apply transition-all duration-200 hover:shadow-md;
+}
+
+.metric-card::before {
+    content: '';
+    @apply absolute top-0 left-0 w-1 h-full bg-primary;
+}
+
+.metric-card.warning::before {
+    @apply bg-amber-500;
+}
+
+.metric-card.danger::before {
+    @apply bg-red-500;
+}
+
+.metric-card.success::before {
+    @apply bg-green-500;
+}
+
+/* Gantt chart styles */
+.gantt-container {
+    @apply overflow-x-auto;
+}
+
+.gantt-row {
+    @apply flex items-center border-b border-border/50 min-h-[48px];
+}
+
+.gantt-label {
+    @apply flex-shrink-0 w-48 px-4 py-2 font-medium truncate;
+}
+
+.gantt-bar-container {
+    @apply flex-grow relative h-8;
+}
+
+.gantt-bar {
+    @apply absolute h-6 rounded-md;
+    top: 4px;
+}
+
+.gantt-bar.planned {
+    @apply bg-blue-200 dark:bg-blue-900/50;
+}
+
+.gantt-bar.actual {
+    @apply bg-blue-500;
+}
+
+.gantt-bar.delayed {
+    @apply bg-orange-500;
+}
+
+.gantt-bar.blocked {
+    @apply bg-red-500;
+}
+
+/* Timeline markers */
+.timeline-marker {
+    @apply absolute top-0 bottom-0 w-px bg-border;
+}
+
+.timeline-marker.today {
+    @apply bg-red-500;
+}
+
+/* Form styles */
+.form-section {
+    @apply space-y-4 p-6 rounded-lg border bg-card;
+}
+
+.form-section-title {
+    @apply text-lg font-semibold mb-4;
+}
+
+/* Timesheet row */
+.timesheet-row {
+    @apply grid gap-2 md:gap-4 items-start p-3 rounded-lg border bg-card mb-2;
+    grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+    .timesheet-row {
+        grid-template-columns: 120px 1fr 150px 1fr 80px 40px;
+    }
+}
+
+/* File upload zone */
+.upload-zone {
+    @apply border-2 border-dashed border-border rounded-lg p-8;
+    @apply flex flex-col items-center justify-center gap-4;
+    @apply transition-colors duration-200;
+    @apply hover:border-primary/50 hover:bg-primary/5;
+}
+
+.upload-zone.dragging {
+    @apply border-primary bg-primary/10;
+}
+
+/* Confidence indicator */
+.confidence-high {
+    @apply text-green-600 dark:text-green-400;
+}
+
+.confidence-medium {
+    @apply text-amber-600 dark:text-amber-400;
+}
+
+.confidence-low {
+    @apply text-red-600 dark:text-red-400;
+}
+
+/* Tab styles */
+.tab-content {
+    @apply mt-4;
+    animation: slideIn 0.3s ease-out forwards;
+}
+
+/* Loading skeleton */
+.skeleton {
+    @apply animate-pulse bg-muted rounded;
+}
+
+/* Alert/notification styles */
+.alert-banner {
+    @apply px-4 py-3 rounded-lg border-l-4;
+}
+
+.alert-banner.info {
+    @apply bg-blue-50 border-blue-500 text-blue-800 dark:bg-blue-900/20 dark:text-blue-200;
+}
+
+.alert-banner.warning {
+    @apply bg-amber-50 border-amber-500 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200;
+}
+
+.alert-banner.error {
+    @apply bg-red-50 border-red-500 text-red-800 dark:bg-red-900/20 dark:text-red-200;
+}
+
+.alert-banner.success {
+    @apply bg-green-50 border-green-500 text-green-800 dark:bg-green-900/20 dark:text-green-200;
+}
+
+/* Button active state */
+button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+/* Print styles */
+@media print {
+    .sidebar, .mobile-nav, .no-print {
+        display: none !important;
+    }
+    
+    .main-content {
+        margin-left: 0 !important;
+    }
+}

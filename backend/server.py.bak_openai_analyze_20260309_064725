@@ -1,0 +1,1406 @@
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import logging
+from pathlib import Path
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional, Dict, Any
+import uuid
+from datetime import datetime, timezone, timedelta
+import bcrypt
+import jwt
+import json
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+# MongoDB connection
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'fitout-os-secret-key-change-in-production')
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+# Security
+security = HTTPBearer()
+
+# Create the main app
+app = FastAPI(title="FitoutOS API", version="1.0.0")
+
+# Create a router with the /api prefix
+api_router = APIRouter(prefix="/api")
+
+# Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Upload directory
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+# ============== PYDANTIC MODELS ==============
+
+class UserRole:
+    ADMIN = "admin"
+    PM = "pm"
+    WORKER = "worker"
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str = UserRole.WORKER
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    role: str
+    created_at: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class JobCreate(BaseModel):
+    job_number: str
+    job_name: str
+    main_contractor: Optional[str] = None
+    site_address: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    status: str = "active"
+
+class JobResponse(BaseModel):
+    id: str
+    job_number: str
+    job_name: str
+    main_contractor: Optional[str] = None
+    site_address: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    status: str
+    created_at: str
+    created_by: str
+
+class MasterTaskCodeCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_global_fallback: bool = False
+
+class MasterTaskCodeResponse(BaseModel):
+    id: str
+    code: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_global_fallback: bool
+    is_active: bool
+
+class JobTaskCodeCreate(BaseModel):
+    master_code_id: str
+    custom_label: Optional[str] = None
+    is_active: bool = True
+
+class JobTaskCodeResponse(BaseModel):
+    id: str
+    job_id: str
+    master_code_id: str
+    code: str
+    name: str
+    custom_label: Optional[str] = None
+    is_active: bool
+
+class TaskCreate(BaseModel):
+    job_id: str
+    task_name: str
+    task_type: Optional[str] = None
+    linked_task_codes: List[str] = []
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_finish: Optional[str] = None
+    duration_days: Optional[int] = None
+    predecessor_ids: List[str] = []
+    owner_party: Optional[str] = None
+    is_internal: bool = True
+    subcontractor_id: Optional[str] = None
+    zone_area: Optional[str] = None
+    status: str = "planned"
+    blockers: Optional[str] = None
+    notes: Optional[str] = None
+    quoted_hours: Optional[float] = None
+    percent_complete: int = 0
+
+class TaskResponse(BaseModel):
+    id: str
+    job_id: str
+    task_name: str
+    task_type: Optional[str] = None
+    linked_task_codes: List[str]
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_finish: Optional[str] = None
+    duration_days: Optional[int] = None
+    predecessor_ids: List[str]
+    owner_party: Optional[str] = None
+    is_internal: bool
+    subcontractor_id: Optional[str] = None
+    zone_area: Optional[str] = None
+    status: str
+    blockers: Optional[str] = None
+    notes: Optional[str] = None
+    quoted_hours: Optional[float] = None
+    actual_hours: float = 0
+    percent_complete: int
+    created_at: str
+
+class TimesheetRowCreate(BaseModel):
+    date: str
+    job_id: Optional[str] = None
+    task_code_id: str
+    description: Optional[str] = None
+    hours: float
+    fallback_reason: Optional[str] = None
+
+class TimesheetCreate(BaseModel):
+    rows: List[TimesheetRowCreate]
+
+class TimesheetRowResponse(BaseModel):
+    id: str
+    user_id: str
+    user_name: str
+    date: str
+    job_id: Optional[str] = None
+    job_number: Optional[str] = None
+    job_name: Optional[str] = None
+    task_code_id: str
+    task_code: str
+    task_code_name: str
+    description: Optional[str] = None
+    hours: float
+    status: str
+    fallback_reason: Optional[str] = None
+    submitted_at: Optional[str] = None
+    approved_at: Optional[str] = None
+    approved_by: Optional[str] = None
+
+class SubcontractorCreate(BaseModel):
+    company_name: str
+    trade_type: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    is_preferred: bool = False
+    is_nominated: bool = False
+    notes: Optional[str] = None
+    typical_lead_time_days: Optional[int] = None
+    typical_crew_size: Optional[int] = None
+
+class SubcontractorResponse(BaseModel):
+    id: str
+    company_name: str
+    trade_type: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    is_preferred: bool
+    is_nominated: bool
+    notes: Optional[str] = None
+    typical_lead_time_days: Optional[int] = None
+    typical_crew_size: Optional[int] = None
+    is_active: bool
+
+class MaterialCreate(BaseModel):
+    task_id: str
+    name: str
+    package_name: Optional[str] = None
+    supplier: Optional[str] = None
+    is_required: bool = True
+    is_long_lead: bool = False
+    order_lead_time_days: Optional[int] = None
+    delivery_buffer_days: Optional[int] = None
+    status: str = "required"
+
+class MaterialResponse(BaseModel):
+    id: str
+    task_id: str
+    name: str
+    package_name: Optional[str] = None
+    supplier: Optional[str] = None
+    is_required: bool
+    is_long_lead: bool
+    order_lead_time_days: Optional[int] = None
+    delivery_buffer_days: Optional[int] = None
+    order_due_date: Optional[str] = None
+    delivery_due_date: Optional[str] = None
+    status: str
+
+class AISettingsUpdate(BaseModel):
+    openai_api_key: Optional[str] = None
+    use_default_key: bool = True
+
+class AISettingsResponse(BaseModel):
+    use_default_key: bool
+    has_custom_key: bool
+
+# Delay tracking models
+class DelayCreate(BaseModel):
+    task_id: str
+    delay_type: str  # internal, subcontractor, main_contractor, approvals, materials, weather, access, inspections
+    delay_days: int
+    description: Optional[str] = None
+    caused_by: Optional[str] = None
+    impact_description: Optional[str] = None
+
+class DelayResponse(BaseModel):
+    id: str
+    task_id: str
+    task_name: str
+    job_id: str
+    delay_type: str
+    delay_days: int
+    description: Optional[str] = None
+    caused_by: Optional[str] = None
+    impact_description: Optional[str] = None
+    affected_tasks: List[str] = []
+    created_at: str
+    resolved: bool = False
+    resolved_at: Optional[str] = None
+
+# ============== AUTH HELPERS ==============
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def create_token(user_id: str, email: str, role: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_roles(*roles):
+    async def role_checker(user: dict = Depends(get_current_user)):
+        if user["role"] not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return role_checker
+
+# ============== AUTH ENDPOINTS ==============
+
+@api_router.post("/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    existing = await db.users.find_one({"email": user_data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user_id = str(uuid.uuid4())
+    user = {
+        "id": user_id,
+        "email": user_data.email,
+        "password": hash_password(user_data.password),
+        "name": user_data.name,
+        "role": user_data.role,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(user)
+    
+    token = create_token(user_id, user_data.email, user_data.role)
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user_id,
+            email=user_data.email,
+            name=user_data.name,
+            role=user_data.role,
+            created_at=user["created_at"]
+        )
+    )
+
+@api_router.post("/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    user = await db.users.find_one({"email": credentials.email})
+    if not user or not verify_password(credentials.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = create_token(user["id"], user["email"], user["role"])
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            role=user["role"],
+            created_at=user["created_at"]
+        )
+    )
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_me(user: dict = Depends(get_current_user)):
+    return UserResponse(**user)
+
+@api_router.get("/users", response_model=List[UserResponse])
+async def get_users(user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    return [UserResponse(**u) for u in users]
+
+# ============== JOBS ENDPOINTS ==============
+
+@api_router.post("/jobs", response_model=JobResponse)
+async def create_job(job_data: JobCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.jobs.find_one({"job_number": job_data.job_number})
+    if existing:
+        raise HTTPException(status_code=400, detail="Job number already exists")
+    
+    job_id = str(uuid.uuid4())
+    job = {
+        "id": job_id,
+        **job_data.model_dump(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+    await db.jobs.insert_one(job)
+    
+    # Auto-assign standard task codes to the new job
+    standard_codes = await db.master_task_codes.find(
+        {"is_global_fallback": False, "is_active": True}, 
+        {"_id": 0}
+    ).to_list(100)
+    
+    job_codes_to_insert = []
+    for master_code in standard_codes:
+        job_code = {
+            "id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "master_code_id": master_code["id"],
+            "code": master_code["code"],
+            "name": master_code["name"],
+            "custom_label": None,
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        job_codes_to_insert.append(job_code)
+    
+    if job_codes_to_insert:
+        await db.job_task_codes.insert_many(job_codes_to_insert)
+        logger.info(f"Auto-assigned {len(job_codes_to_insert)} task codes to job {job_id}")
+    
+    return JobResponse(**job)
+
+@api_router.get("/jobs", response_model=List[JobResponse])
+async def get_jobs(user: dict = Depends(get_current_user)):
+    jobs = await db.jobs.find({}, {"_id": 0}).to_list(1000)
+    return [JobResponse(**j) for j in jobs]
+
+@api_router.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str, user: dict = Depends(get_current_user)):
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobResponse(**job)
+
+@api_router.put("/jobs/{job_id}", response_model=JobResponse)
+async def update_job(job_id: str, job_data: JobCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.jobs.find_one({"id": job_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    update_data = job_data.model_dump()
+    await db.jobs.update_one({"id": job_id}, {"$set": update_data})
+    
+    updated = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    return JobResponse(**updated)
+
+@api_router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    result = await db.jobs.delete_one({"id": job_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"message": "Job deleted"}
+
+# ============== MASTER TASK CODES ==============
+
+@api_router.post("/task-codes/master", response_model=MasterTaskCodeResponse)
+async def create_master_task_code(code_data: MasterTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    existing = await db.master_task_codes.find_one({"code": code_data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Task code already exists")
+    
+    code_id = str(uuid.uuid4())
+    code = {
+        "id": code_id,
+        **code_data.model_dump(),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.master_task_codes.insert_one(code)
+    return MasterTaskCodeResponse(**code)
+
+@api_router.get("/task-codes/master", response_model=List[MasterTaskCodeResponse])
+async def get_master_task_codes(user: dict = Depends(get_current_user)):
+    codes = await db.master_task_codes.find({}, {"_id": 0}).to_list(1000)
+    return [MasterTaskCodeResponse(**c) for c in codes]
+
+@api_router.put("/task-codes/master/{code_id}", response_model=MasterTaskCodeResponse)
+async def update_master_task_code(code_id: str, code_data: MasterTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    existing = await db.master_task_codes.find_one({"id": code_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task code not found")
+    
+    await db.master_task_codes.update_one({"id": code_id}, {"$set": code_data.model_dump()})
+    updated = await db.master_task_codes.find_one({"id": code_id}, {"_id": 0})
+    return MasterTaskCodeResponse(**updated)
+
+@api_router.get("/task-codes/fallback", response_model=List[MasterTaskCodeResponse])
+async def get_fallback_task_codes(user: dict = Depends(get_current_user)):
+    """Get global fallback task codes for non-job-specific entries"""
+    codes = await db.master_task_codes.find({"is_global_fallback": True, "is_active": True}, {"_id": 0}).to_list(100)
+    return [MasterTaskCodeResponse(**c) for c in codes]
+
+# ============== JOB TASK CODES ==============
+
+@api_router.post("/jobs/{job_id}/task-codes", response_model=JobTaskCodeResponse)
+async def add_job_task_code(job_id: str, code_data: JobTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    master_code = await db.master_task_codes.find_one({"id": code_data.master_code_id})
+    if not master_code:
+        raise HTTPException(status_code=404, detail="Master task code not found")
+    
+    existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": code_data.master_code_id})
+    if existing:
+        raise HTTPException(status_code=400, detail="Task code already added to this job")
+    
+    code_id = str(uuid.uuid4())
+    job_code = {
+        "id": code_id,
+        "job_id": job_id,
+        "master_code_id": code_data.master_code_id,
+        "code": master_code["code"],
+        "name": master_code["name"],
+        "custom_label": code_data.custom_label,
+        "is_active": code_data.is_active,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.job_task_codes.insert_one(job_code)
+    return JobTaskCodeResponse(**job_code)
+
+@api_router.get("/jobs/{job_id}/task-codes", response_model=List[JobTaskCodeResponse])
+async def get_job_task_codes(job_id: str, active_only: bool = False, user: dict = Depends(get_current_user)):
+    query = {"job_id": job_id}
+    if active_only:
+        query["is_active"] = True
+    codes = await db.job_task_codes.find(query, {"_id": 0}).to_list(1000)
+    return [JobTaskCodeResponse(**c) for c in codes]
+
+@api_router.put("/jobs/{job_id}/task-codes/{code_id}", response_model=JobTaskCodeResponse)
+async def update_job_task_code(job_id: str, code_id: str, code_data: JobTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.job_task_codes.find_one({"id": code_id, "job_id": job_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Job task code not found")
+    
+    await db.job_task_codes.update_one(
+        {"id": code_id},
+        {"$set": {"custom_label": code_data.custom_label, "is_active": code_data.is_active}}
+    )
+    updated = await db.job_task_codes.find_one({"id": code_id}, {"_id": 0})
+    return JobTaskCodeResponse(**updated)
+
+# ============== TASKS ==============
+
+@api_router.post("/tasks", response_model=TaskResponse)
+async def create_task(task_data: TaskCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    job = await db.jobs.find_one({"id": task_data.job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    task_id = str(uuid.uuid4())
+    task = {
+        "id": task_id,
+        **task_data.model_dump(),
+        "actual_hours": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+    await db.tasks.insert_one(task)
+    return TaskResponse(**task)
+
+@api_router.get("/tasks", response_model=List[TaskResponse])
+async def get_tasks(job_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if job_id:
+        query["job_id"] = job_id
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+    return [TaskResponse(**t) for t in tasks]
+
+@api_router.get("/tasks/{task_id}", response_model=TaskResponse)
+async def get_task(task_id: str, user: dict = Depends(get_current_user)):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskResponse(**task)
+
+@api_router.put("/tasks/{task_id}", response_model=TaskResponse)
+async def update_task(task_id: str, task_data: TaskCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.tasks.find_one({"id": task_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    update_data = task_data.model_dump()
+    await db.tasks.update_one({"id": task_id}, {"$set": update_data})
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    return TaskResponse(**updated)
+
+# ============== TIMESHEETS ==============
+
+@api_router.post("/timesheets")
+async def create_timesheet_entries(timesheet_data: TimesheetCreate, user: dict = Depends(get_current_user)):
+    entries = []
+    for row in timesheet_data.rows:
+        # Validate job if provided
+        job = None
+        task_code_info = None
+        
+        if row.job_id:
+            job = await db.jobs.find_one({"id": row.job_id}, {"_id": 0})
+            if not job:
+                raise HTTPException(status_code=400, detail=f"Job not found: {row.job_id}")
+            
+            # First check if it's a job-specific code
+            job_code = await db.job_task_codes.find_one({"id": row.task_code_id, "job_id": row.job_id, "is_active": True}, {"_id": 0})
+            if job_code:
+                task_code_info = {"code": job_code["code"], "name": job_code.get("custom_label") or job_code["name"]}
+            else:
+                # Check if it's a fallback code (allowed even with job selected)
+                master_code = await db.master_task_codes.find_one({"id": row.task_code_id, "is_global_fallback": True}, {"_id": 0})
+                if master_code:
+                    task_code_info = {"code": master_code["code"], "name": master_code["name"]}
+                else:
+                    # Check if task_code_id is actually a master code id that should be added to job
+                    any_master = await db.master_task_codes.find_one({"id": row.task_code_id}, {"_id": 0})
+                    if any_master:
+                        task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+                    else:
+                        raise HTTPException(status_code=400, detail=f"Task code not found or not active for this job")
+        else:
+            # No job - must use fallback code
+            master_code = await db.master_task_codes.find_one({"id": row.task_code_id, "is_global_fallback": True}, {"_id": 0})
+            if not master_code:
+                # Also allow any master code as fallback when no job
+                any_master = await db.master_task_codes.find_one({"id": row.task_code_id}, {"_id": 0})
+                if any_master:
+                    task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+                else:
+                    raise HTTPException(status_code=400, detail="Invalid task code")
+            else:
+                task_code_info = {"code": master_code["code"], "name": master_code["name"]}
+        
+        entry_id = str(uuid.uuid4())
+        entry = {
+            "id": entry_id,
+            "user_id": user["id"],
+            "user_name": user["name"],
+            "date": row.date,
+            "job_id": row.job_id,
+            "job_number": job["job_number"] if job else None,
+            "job_name": job["job_name"] if job else None,
+            "task_code_id": row.task_code_id,
+            "task_code": task_code_info["code"],
+            "task_code_name": task_code_info["name"],
+            "description": row.description,
+            "hours": row.hours,
+            "status": "draft",
+            "fallback_reason": row.fallback_reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "submitted_at": None,
+            "approved_at": None,
+            "approved_by": None
+        }
+        entries.append(entry)
+    
+    if entries:
+        await db.timesheets.insert_many(entries)
+        # Remove MongoDB _id from response
+        for entry in entries:
+            entry.pop('_id', None)
+    
+    return {"message": f"Created {len(entries)} timesheet entries", "entries": entries}
+
+@api_router.get("/timesheets", response_model=List[TimesheetRowResponse])
+async def get_timesheets(
+    user_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    
+    # Workers can only see their own timesheets
+    if user["role"] == UserRole.WORKER:
+        query["user_id"] = user["id"]
+    elif user_id:
+        query["user_id"] = user_id
+    
+    if job_id:
+        query["job_id"] = job_id
+    if status:
+        query["status"] = status
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+    
+    entries = await db.timesheets.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    return [TimesheetRowResponse(**e) for e in entries]
+
+@api_router.post("/timesheets/submit")
+async def submit_timesheets(entry_ids: List[str], user: dict = Depends(get_current_user)):
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "user_id": user["id"], "status": "draft"},
+        {"$set": {"status": "submitted", "submitted_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": f"Submitted {result.modified_count} entries"}
+
+@api_router.post("/timesheets/approve")
+async def approve_timesheets(entry_ids: List[str], user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "status": "submitted"},
+        {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc).isoformat(), "approved_by": user["id"]}}
+    )
+    return {"message": f"Approved {result.modified_count} entries"}
+
+@api_router.post("/timesheets/reject")
+async def reject_timesheets(entry_ids: List[str], user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "status": "submitted"},
+        {"$set": {"status": "needs_correction"}}
+    )
+    return {"message": f"Rejected {result.modified_count} entries"}
+
+@api_router.delete("/timesheets/{entry_id}")
+async def delete_timesheet_entry(entry_id: str, user: dict = Depends(get_current_user)):
+    entry = await db.timesheets.find_one({"id": entry_id})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    
+    if user["role"] == UserRole.WORKER and entry["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Cannot delete other users' entries")
+    
+    if entry["status"] not in ["draft", "needs_correction"]:
+        raise HTTPException(status_code=400, detail="Can only delete draft or needs_correction entries")
+    
+    await db.timesheets.delete_one({"id": entry_id})
+    return {"message": "Entry deleted"}
+
+# ============== SUBCONTRACTORS ==============
+
+@api_router.post("/subcontractors", response_model=SubcontractorResponse)
+async def create_subcontractor(sub_data: SubcontractorCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    sub_id = str(uuid.uuid4())
+    sub = {
+        "id": sub_id,
+        **sub_data.model_dump(),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.subcontractors.insert_one(sub)
+    return SubcontractorResponse(**sub)
+
+@api_router.get("/subcontractors", response_model=List[SubcontractorResponse])
+async def get_subcontractors(user: dict = Depends(get_current_user)):
+    subs = await db.subcontractors.find({}, {"_id": 0}).to_list(1000)
+    return [SubcontractorResponse(**s) for s in subs]
+
+@api_router.put("/subcontractors/{sub_id}", response_model=SubcontractorResponse)
+async def update_subcontractor(sub_id: str, sub_data: SubcontractorCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.subcontractors.find_one({"id": sub_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Subcontractor not found")
+    
+    await db.subcontractors.update_one({"id": sub_id}, {"$set": sub_data.model_dump()})
+    updated = await db.subcontractors.find_one({"id": sub_id}, {"_id": 0})
+    return SubcontractorResponse(**updated)
+
+# ============== MATERIALS ==============
+
+@api_router.post("/materials", response_model=MaterialResponse)
+async def create_material(mat_data: MaterialCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    task = await db.tasks.find_one({"id": mat_data.task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    mat_id = str(uuid.uuid4())
+    
+    # Calculate due dates based on task start
+    order_due = None
+    delivery_due = None
+    if task.get("planned_start"):
+        try:
+            task_start = datetime.fromisoformat(task["planned_start"].replace('Z', '+00:00'))
+            if mat_data.order_lead_time_days:
+                order_due = (task_start - timedelta(days=mat_data.order_lead_time_days)).isoformat()
+            if mat_data.delivery_buffer_days:
+                delivery_due = (task_start - timedelta(days=mat_data.delivery_buffer_days)).isoformat()
+        except:
+            pass
+    
+    material = {
+        "id": mat_id,
+        **mat_data.model_dump(),
+        "order_due_date": order_due,
+        "delivery_due_date": delivery_due,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.materials.insert_one(material)
+    return MaterialResponse(**material)
+
+@api_router.get("/materials", response_model=List[MaterialResponse])
+async def get_materials(task_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if task_id:
+        query["task_id"] = task_id
+    materials = await db.materials.find(query, {"_id": 0}).to_list(1000)
+    return [MaterialResponse(**m) for m in materials]
+
+@api_router.put("/materials/{mat_id}", response_model=MaterialResponse)
+async def update_material(mat_id: str, mat_data: MaterialCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.materials.find_one({"id": mat_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Material not found")
+    
+    await db.materials.update_one({"id": mat_id}, {"$set": mat_data.model_dump()})
+    updated = await db.materials.find_one({"id": mat_id}, {"_id": 0})
+    return MaterialResponse(**updated)
+
+# ============== DELAY TRACKING ==============
+
+@api_router.post("/delays", response_model=DelayResponse)
+async def create_delay(delay_data: DelayCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Record a delay and calculate roll-on effects"""
+    task = await db.tasks.find_one({"id": delay_data.task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    delay_id = str(uuid.uuid4())
+    
+    # Find affected downstream tasks (tasks that depend on this one)
+    affected_task_ids = []
+    all_tasks = await db.tasks.find({"job_id": task["job_id"]}, {"_id": 0}).to_list(1000)
+    
+    # Simple downstream detection: tasks starting after this one ends
+    if task.get("planned_finish"):
+        task_end = datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00'))
+        for t in all_tasks:
+            if t["id"] != task["id"] and t.get("planned_start"):
+                t_start = datetime.fromisoformat(t["planned_start"].replace('Z', '+00:00'))
+                if t_start >= task_end:
+                    affected_task_ids.append(t["id"])
+                    # Update the downstream task status to at_risk if not already blocked
+                    if t["status"] not in ["blocked", "complete"]:
+                        await db.tasks.update_one(
+                            {"id": t["id"]},
+                            {"$set": {"status": "at_risk"}}
+                        )
+    
+    # Update the delayed task status
+    new_status = "delayed" if delay_data.delay_type in ["internal", "subcontractor"] else "blocked"
+    await db.tasks.update_one(
+        {"id": delay_data.task_id},
+        {"$set": {
+            "status": new_status,
+            "blockers": delay_data.description
+        }}
+    )
+    
+    delay = {
+        "id": delay_id,
+        "task_id": delay_data.task_id,
+        "task_name": task["task_name"],
+        "job_id": task["job_id"],
+        "delay_type": delay_data.delay_type,
+        "delay_days": delay_data.delay_days,
+        "description": delay_data.description,
+        "caused_by": delay_data.caused_by,
+        "impact_description": delay_data.impact_description,
+        "affected_tasks": affected_task_ids,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+        "resolved": False,
+        "resolved_at": None
+    }
+    await db.delays.insert_one(delay)
+    
+    return DelayResponse(**delay)
+
+@api_router.get("/delays", response_model=List[DelayResponse])
+async def get_delays(
+    job_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    resolved: Optional[bool] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    if job_id:
+        query["job_id"] = job_id
+    if task_id:
+        query["task_id"] = task_id
+    if resolved is not None:
+        query["resolved"] = resolved
+    
+    delays = await db.delays.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [DelayResponse(**d) for d in delays]
+
+@api_router.post("/delays/{delay_id}/resolve")
+async def resolve_delay(delay_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Mark a delay as resolved"""
+    delay = await db.delays.find_one({"id": delay_id})
+    if not delay:
+        raise HTTPException(status_code=404, detail="Delay not found")
+    
+    await db.delays.update_one(
+        {"id": delay_id},
+        {"$set": {
+            "resolved": True,
+            "resolved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Optionally update task status back to planned or active
+    task = await db.tasks.find_one({"id": delay["task_id"]})
+    if task and task["status"] in ["delayed", "blocked"]:
+        await db.tasks.update_one(
+            {"id": delay["task_id"]},
+            {"$set": {"status": "planned", "blockers": None}}
+        )
+    
+    return {"message": "Delay resolved"}
+
+@api_router.get("/delays/impact-analysis/{task_id}")
+async def get_delay_impact(task_id: str, delay_days: int = 1, user: dict = Depends(get_current_user)):
+    """Analyze the potential impact of a delay on downstream tasks"""
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    all_tasks = await db.tasks.find({"job_id": task["job_id"]}, {"_id": 0}).to_list(1000)
+    
+    affected = []
+    if task.get("planned_finish"):
+        task_end = datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00'))
+        new_end = task_end + timedelta(days=delay_days)
+        
+        for t in all_tasks:
+            if t["id"] != task["id"] and t.get("planned_start"):
+                t_start = datetime.fromisoformat(t["planned_start"].replace('Z', '+00:00'))
+                if task_end <= t_start <= new_end:
+                    affected.append({
+                        "task_id": t["id"],
+                        "task_name": t["task_name"],
+                        "planned_start": t["planned_start"],
+                        "impact_days": delay_days,
+                        "new_start": (t_start + timedelta(days=delay_days)).isoformat()
+                    })
+    
+    return {
+        "delayed_task": {
+            "id": task["id"],
+            "name": task["task_name"],
+            "current_finish": task.get("planned_finish"),
+            "new_finish": (datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00')) + timedelta(days=delay_days)).isoformat() if task.get("planned_finish") else None
+        },
+        "delay_days": delay_days,
+        "affected_tasks": affected,
+        "total_affected": len(affected)
+    }
+
+# ============== FILE UPLOAD & AI ANALYSIS ==============
+
+@api_router.post("/jobs/{job_id}/upload")
+async def upload_job_files(
+    job_id: str,
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job_upload_dir = UPLOAD_DIR / job_id
+    job_upload_dir.mkdir(exist_ok=True)
+    
+    uploaded_files = []
+    for file in files:
+        file_id = str(uuid.uuid4())
+        file_ext = Path(file.filename).suffix
+        file_path = job_upload_dir / f"{file_id}{file_ext}"
+        
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        file_record = {
+            "id": file_id,
+            "job_id": job_id,
+            "filename": file.filename,
+            "filepath": str(file_path),
+            "content_type": file.content_type,
+            "size": len(content),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_by": user["id"]
+        }
+        await db.job_files.insert_one(file_record)
+        uploaded_files.append({"id": file_id, "filename": file.filename})
+    
+    return {"message": f"Uploaded {len(uploaded_files)} files", "files": uploaded_files}
+
+@api_router.get("/jobs/{job_id}/files")
+async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
+    files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
+    return files
+
+@api_router.post("/jobs/{job_id}/analyze")
+async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Analyze uploaded files using AI and return proposed job setup data"""
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded for this job")
+    
+    # Get AI settings
+    ai_settings = await db.ai_settings.find_one({}, {"_id": 0})
+    
+    # Get API key
+    if ai_settings and not ai_settings.get("use_default_key") and ai_settings.get("openai_api_key"):
+        api_key = ai_settings["openai_api_key"]
+    else:
+        api_key = os.environ.get("EMERGENT_LLM_KEY")
+    
+    if not api_key:
+        raise HTTPException(status_code=500, detail="No AI API key configured")
+    
+    try:
+        
+        # Prepare file attachments
+        file_contents = []
+        for f in files:
+            mime_type = f.get("content_type", "application/octet-stream")
+            if f["filename"].endswith(".xlsx"):
+                mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            elif f["filename"].endswith(".pdf"):
+                mime_type = "application/pdf"
+            elif f["filename"].endswith(".csv"):
+                mime_type = "text/csv"
+            
+            file_contents.append(FileContentWithMimeType(
+                file_path=f["filepath"],
+                mime_type=mime_type
+            ))
+        
+        # Use Gemini for file analysis (as per playbook)
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"job-analysis-{job_id}",
+            system_message="""You are an expert construction project analyst for commercial interior fitouts in New Zealand.
+            Analyze the uploaded documents and extract structured information for job setup.
+            Return your analysis as a JSON object with the following structure:
+            {
+                "job_summary": { "description": "", "estimated_value": "", "key_milestones": [] },
+                "scope_items": [{ "item": "", "quantity": "", "unit": "", "quoted_hours": null, "inclusions": "", "exclusions": "", "allowances": "", "confidence": "high|medium|low" }],
+                "programme_dates": [{ "milestone": "", "date": "", "source": "", "confidence": "high|medium|low" }],
+                "proposed_tasks": [{ "name": "", "type": "", "suggested_codes": [], "duration_days": null, "predecessors": [], "confidence": "high|medium|low" }],
+                "proposed_task_codes": [{ "code": "", "reason": "" }],
+                "materials": [{ "name": "", "task": "", "is_long_lead": false, "supplier": "" }],
+                "subcontractors": [{ "trade": "", "scope": "", "suggested_company": "" }],
+                "dependencies": [{ "task": "", "blocked_by": "", "party": "" }],
+                "risks": [{ "description": "", "severity": "high|medium|low", "mitigation": "" }]
+            }
+            Be thorough but only include items you have confidence in. Mark unclear items with low confidence."""
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(
+            text=f"""Analyze these documents for job: {job['job_name']} ({job['job_number']})
+            Site: {job.get('site_address', 'Not specified')}
+            Main Contractor: {job.get('main_contractor', 'Not specified')}
+            
+            Extract all relevant information for setting up this fitout project including:
+            - Scope items with quantities and quoted hours
+            - Programme dates and milestones
+            - Recommended internal tasks
+            - Task codes that should be active
+            - Materials and procurement items
+            - Subcontractor requirements
+            - Dependencies and blockers
+            - Risks and issues
+            
+            Return ONLY valid JSON, no markdown or explanation.""",
+            file_contents=file_contents
+        )
+        
+        response = await chat.send_message(user_message)
+        
+        # Parse AI response
+        try:
+            # Clean the response - remove markdown code blocks if present
+            clean_response = response.strip()
+            if clean_response.startswith("```"):
+                clean_response = clean_response.split("```")[1]
+                if clean_response.startswith("json"):
+                    clean_response = clean_response[4:]
+            
+            analysis = json.loads(clean_response)
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return a structured error response
+            analysis = {
+                "raw_response": response,
+                "parse_error": True,
+                "job_summary": {"description": "AI analysis completed but response needs manual review"},
+                "scope_items": [],
+                "programme_dates": [],
+                "proposed_tasks": [],
+                "proposed_task_codes": [],
+                "materials": [],
+                "subcontractors": [],
+                "dependencies": [],
+                "risks": []
+            }
+        
+        # Store the analysis for review
+        analysis_record = {
+            "id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "analysis": analysis,
+            "status": "pending_review",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["id"]
+        }
+        await db.job_analyses.insert_one(analysis_record)
+        
+        return {"analysis_id": analysis_record["id"], "analysis": analysis}
+        
+    except Exception as e:
+        logger.error(f"AI analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+@api_router.get("/jobs/{job_id}/analysis")
+async def get_job_analysis(job_id: str, user: dict = Depends(get_current_user)):
+    analysis = await db.job_analyses.find_one({"job_id": job_id}, {"_id": 0})
+    if not analysis:
+        raise HTTPException(status_code=404, detail="No analysis found for this job")
+    return analysis
+
+@api_router.post("/jobs/{job_id}/analysis/confirm")
+async def confirm_job_analysis(
+    job_id: str,
+    confirmed_data: Dict[str, Any],
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    """Confirm and apply the AI analysis to create actual job data"""
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    created_items = {
+        "tasks": 0,
+        "task_codes": 0,
+        "materials": 0,
+        "scope_items": 0
+    }
+    
+    # Process confirmed task codes
+    if "task_codes" in confirmed_data:
+        for code_data in confirmed_data["task_codes"]:
+            master_code = await db.master_task_codes.find_one({"code": code_data["code"]})
+            if master_code:
+                existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code["id"]})
+                if not existing:
+                    job_code = {
+                        "id": str(uuid.uuid4()),
+                        "job_id": job_id,
+                        "master_code_id": master_code["id"],
+                        "code": master_code["code"],
+                        "name": master_code["name"],
+                        "custom_label": None,
+                        "is_active": True,
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    await db.job_task_codes.insert_one(job_code)
+                    created_items["task_codes"] += 1
+    
+    # Process confirmed tasks
+    if "tasks" in confirmed_data:
+        for task_data in confirmed_data["tasks"]:
+            task = {
+                "id": str(uuid.uuid4()),
+                "job_id": job_id,
+                "task_name": task_data.get("name", "Unnamed Task"),
+                "task_type": task_data.get("type"),
+                "linked_task_codes": task_data.get("suggested_codes", []),
+                "planned_start": task_data.get("planned_start"),
+                "planned_finish": task_data.get("planned_finish"),
+                "duration_days": task_data.get("duration_days"),
+                "predecessor_ids": [],
+                "owner_party": None,
+                "is_internal": True,
+                "subcontractor_id": None,
+                "zone_area": None,
+                "status": "planned",
+                "blockers": None,
+                "notes": None,
+                "quoted_hours": task_data.get("quoted_hours"),
+                "actual_hours": 0,
+                "percent_complete": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_by": user["id"]
+            }
+            await db.tasks.insert_one(task)
+            created_items["tasks"] += 1
+    
+    # Process scope items
+    if "scope_items" in confirmed_data:
+        for scope_data in confirmed_data["scope_items"]:
+            scope_item = {
+                "id": str(uuid.uuid4()),
+                "job_id": job_id,
+                "item": scope_data.get("item"),
+                "quantity": scope_data.get("quantity"),
+                "unit": scope_data.get("unit"),
+                "quoted_hours": scope_data.get("quoted_hours"),
+                "inclusions": scope_data.get("inclusions"),
+                "exclusions": scope_data.get("exclusions"),
+                "allowances": scope_data.get("allowances"),
+                "confidence": scope_data.get("confidence", "medium"),
+                "task_id": None,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.scope_items.insert_one(scope_item)
+            created_items["scope_items"] += 1
+    
+    # Update analysis status
+    await db.job_analyses.update_one(
+        {"job_id": job_id},
+        {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"message": "Analysis confirmed and applied", "created": created_items}
+
+# ============== AI SETTINGS ==============
+
+@api_router.get("/settings/ai", response_model=AISettingsResponse)
+async def get_ai_settings(user: dict = Depends(require_roles(UserRole.ADMIN))):
+    settings = await db.ai_settings.find_one({}, {"_id": 0})
+    if not settings:
+        return AISettingsResponse(use_default_key=True, has_custom_key=False)
+    return AISettingsResponse(
+        use_default_key=settings.get("use_default_key", True),
+        has_custom_key=bool(settings.get("openai_api_key"))
+    )
+
+@api_router.put("/settings/ai", response_model=AISettingsResponse)
+async def update_ai_settings(settings_data: AISettingsUpdate, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    update = {"use_default_key": settings_data.use_default_key}
+    if settings_data.openai_api_key:
+        update["openai_api_key"] = settings_data.openai_api_key
+    
+    await db.ai_settings.update_one({}, {"$set": update}, upsert=True)
+    
+    settings = await db.ai_settings.find_one({}, {"_id": 0})
+    return AISettingsResponse(
+        use_default_key=settings.get("use_default_key", True),
+        has_custom_key=bool(settings.get("openai_api_key"))
+    )
+
+# ============== DASHBOARD / REPORTS ==============
+
+@api_router.get("/dashboard/summary")
+async def get_dashboard_summary(user: dict = Depends(get_current_user)):
+    """Get dashboard summary data"""
+    now = datetime.now(timezone.utc)
+    week_from_now = (now + timedelta(days=7)).isoformat()
+    
+    # Count active jobs
+    active_jobs = await db.jobs.count_documents({"status": "active"})
+    
+    # Tasks starting soon (within 7 days)
+    tasks_starting_soon = await db.tasks.count_documents({
+        "planned_start": {"$lte": week_from_now},
+        "status": "planned"
+    })
+    
+    # Blocked tasks
+    blocked_tasks = await db.tasks.count_documents({"status": "blocked"})
+    
+    # Pending timesheet approvals
+    pending_approvals = await db.timesheets.count_documents({"status": "submitted"})
+    
+    # Materials needing attention
+    materials_attention = await db.materials.count_documents({
+        "status": {"$in": ["required", "takeoff_needed"]}
+    })
+    
+    # Total hours this week
+    week_ago = (now - timedelta(days=7)).isoformat()
+    pipeline = [
+        {"$match": {"date": {"$gte": week_ago[:10]}, "status": "approved"}},
+        {"$group": {"_id": None, "total": {"$sum": "$hours"}}}
+    ]
+    hours_result = await db.timesheets.aggregate(pipeline).to_list(1)
+    total_hours_week = hours_result[0]["total"] if hours_result else 0
+    
+    return {
+        "active_jobs": active_jobs,
+        "tasks_starting_soon": tasks_starting_soon,
+        "blocked_tasks": blocked_tasks,
+        "pending_approvals": pending_approvals,
+        "materials_attention": materials_attention,
+        "total_hours_week": total_hours_week
+    }
+
+@api_router.get("/reports/hours-by-job")
+async def get_hours_by_job(user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Get hours summary by job"""
+    pipeline = [
+        {"$match": {"status": "approved"}},
+        {"$group": {
+            "_id": "$job_id",
+            "job_number": {"$first": "$job_number"},
+            "job_name": {"$first": "$job_name"},
+            "total_hours": {"$sum": "$hours"}
+        }},
+        {"$sort": {"total_hours": -1}}
+    ]
+    results = await db.timesheets.aggregate(pipeline).to_list(100)
+    
+    # Add quoted hours from jobs
+    for r in results:
+        if r["_id"]:
+            tasks = await db.tasks.find({"job_id": r["_id"]}, {"_id": 0, "quoted_hours": 1}).to_list(1000)
+            r["quoted_hours"] = sum(t.get("quoted_hours", 0) or 0 for t in tasks)
+            r["variance"] = r["total_hours"] - r["quoted_hours"] if r["quoted_hours"] else None
+    
+    return results
+
+@api_router.get("/reports/hours-by-code")
+async def get_hours_by_code(job_id: Optional[str] = None, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Get hours summary by task code"""
+    match = {"status": "approved"}
+    if job_id:
+        match["job_id"] = job_id
+    
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": "$task_code",
+            "task_code_name": {"$first": "$task_code_name"},
+            "total_hours": {"$sum": "$hours"},
+            "entry_count": {"$sum": 1}
+        }},
+        {"$sort": {"total_hours": -1}}
+    ]
+    results = await db.timesheets.aggregate(pipeline).to_list(100)
+    return results
+
+# ============== SEED DATA ==============
+
+@api_router.post("/seed/task-codes")
+async def seed_master_task_codes(user: dict = Depends(require_roles(UserRole.ADMIN))):
+    """Seed default master task codes"""
+    default_codes = [
+        {"code": "101", "name": "Suspended Ceilings / 2-way", "category": "Ceilings", "is_global_fallback": False},
+        {"code": "102", "name": "Suspended Ceilings / 1-way", "category": "Ceilings", "is_global_fallback": False},
+        {"code": "103", "name": "Partition Walls", "category": "Walls", "is_global_fallback": False},
+        {"code": "104", "name": "Aluminium", "category": "Framing", "is_global_fallback": False},
+        {"code": "105", "name": "Plasterboard / Linings", "category": "Walls", "is_global_fallback": False},
+        {"code": "106", "name": "Stopping", "category": "Finishing", "is_global_fallback": False},
+        {"code": "107", "name": "Insulation", "category": "Insulation", "is_global_fallback": False},
+        {"code": "108", "name": "Bulkheads", "category": "Ceilings", "is_global_fallback": False},
+        {"code": "109", "name": "Fire Rating", "category": "Compliance", "is_global_fallback": False},
+        {"code": "110", "name": "Acoustic Treatment", "category": "Acoustic", "is_global_fallback": False},
+        {"code": "P&G", "name": "Prelims & General", "category": "General", "is_global_fallback": True},
+        {"code": "P&Gs", "name": "P&G Site", "category": "General", "is_global_fallback": True},
+        {"code": "P&Gt", "name": "P&G Travel", "category": "General", "is_global_fallback": True},
+        {"code": "Tools", "name": "Tools & Equipment", "category": "General", "is_global_fallback": True},
+        {"code": "Safety", "name": "Safety & Compliance", "category": "General", "is_global_fallback": True},
+        {"code": "Staff", "name": "Staff / Admin", "category": "General", "is_global_fallback": True},
+        {"code": "R/M", "name": "Repairs & Maintenance", "category": "General", "is_global_fallback": True},
+        {"code": "Admin", "name": "Administration", "category": "General", "is_global_fallback": True},
+        {"code": "Yard", "name": "Yard / Workshop", "category": "General", "is_global_fallback": True},
+    ]
+    
+    created = 0
+    for code_data in default_codes:
+        existing = await db.master_task_codes.find_one({"code": code_data["code"]})
+        if not existing:
+            code = {
+                "id": str(uuid.uuid4()),
+                **code_data,
+                "description": None,
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.master_task_codes.insert_one(code)
+            created += 1
+    
+    return {"message": f"Created {created} task codes"}
+
+# Include router
+app.include_router(api_router)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()

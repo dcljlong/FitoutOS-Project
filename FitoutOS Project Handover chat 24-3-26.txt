@@ -1,0 +1,221 @@
+FITOUTOS — FULL HANDOVER SUMMARY (March 2026)
+PROJECT NAME
+
+FitoutOS
+
+Repo
+
+https://github.com/dcljlong/FitoutOS-Project
+
+Root path
+D:\FitoutOS Project\app
+Stack
+
+Backend
+
+FastAPI
+MongoDB
+Python
+server.py main file
+
+Frontend
+
+React + CRACO
+ShadCN UI
+Recharts
+React Router
+
+Ports
+
+backend 8010
+frontend 3000
+CURRENT STATUS
+
+System runs locally
+Login works
+Jobs page works
+Job setup works
+AI analysis works
+Confirm works (mostly)
+Tasks page works
+Reports page works
+Resource analysis works
+Edit job now works
+Build passes
+Repo clean
+
+Latest commit
+
+bc745ef fix edit job step override, fix job setup errors, fix tasks loading, UI fixes
+CORE FLOW (IMPORTANT)
+
+Pipeline must stay:
+
+Job create
+→ Upload files
+→ AI analysis
+→ Confirm
+→ Create scope items
+→ Create task codes
+→ Create programme
+→ Create tasks
+→ Timesheets
+→ Task actual hours
+→ Resource analysis
+→ Reports
+
+This flow must not be broken.
+
+JOB SETUP FLOW
+
+Page:
+
+JobSetupPage.js
+
+Steps:
+
+0 Basic info
+1 Upload files
+2 AI analysis
+3 Review / confirm
+
+We added:
+
+?step=0 override
+
+So Edit Job goes to basic info.
+
+Important logic:
+
+hasStepOverride
+searchParams
+setCurrentStep guarded
+
+Do not remove.
+
+EDIT JOB FIX
+
+File
+
+JobDetailPage.js
+
+Edit button now:
+
+/jobs/{jobId}/setup?step=0
+
+And JobSetupPage respects step override.
+
+Working.
+
+TASKS ISSUE (NEXT BUG)
+
+Problem:
+
+Some jobs show no tasks on JobDetailPage.
+
+Cause:
+
+Tasks only created when confirm endpoint runs.
+
+Need to verify:
+
+/confirm
+/create tasks
+/create scope
+/create programme
+
+Backend file:
+
+backend/server.py
+
+Look for confirm / save / analysis confirm endpoint.
+
+RESOURCE ANALYSIS
+
+Working but depends on tasks existing.
+
+Endpoint:
+
+GET /api/jobs/{job_id}/resource-analysis
+
+Depends on:
+
+tasks collection
+scope_items
+task_codes
+programme
+
+If tasks missing → analysis empty.
+
+FILES THAT WERE RECENTLY MODIFIED
+backend/server.py
+frontend/src/pages/JobDetailPage.js
+frontend/src/pages/JobSetupPage.js
+frontend/src/pages/ReportsPage.js
+frontend/src/pages/TasksPage.js
+frontend/src/pages/TimesheetApprovalPage.js
+KNOWN FIXES DONE
+
+✔ Edit job step override
+✔ Fix JSX errors
+✔ Fix duplicate variable errors
+✔ Fix getErrorMessage helper
+✔ Fix build errors
+✔ Fix job detail navigation
+✔ Fix step override logic
+✔ Fix compile errors
+✔ Fix missing imports
+
+CURRENT PRIORITY
+Ensure tasks always created on confirm
+Ensure JobDetailPage always shows tasks
+Ensure resource analysis always uses tasks
+Ensure reports match resource analysis
+Clean confirm pipeline
+Prepare for deployment
+NEXT TASK FOR NEW AI
+
+Start here:
+
+Check confirm endpoint in backend
+
+D:\FitoutOS Project\app\backend\server.py
+
+Find:
+
+confirm
+save setup
+create tasks
+create programme
+create scope
+insert tasks
+
+Verify tasks always inserted.
+
+If not, fix.
+
+RULES FOR THIS PROJECT
+
+Always use PowerShell steps
+One change at a time
+Never edit dist
+Always verify after change
+Always build after frontend change
+Always test endpoint after backend change
+Never break pipeline
+Never change data model without checking analysis + reports
+
+USER PREFERENCE
+
+User wants:
+
+step-by-step
+PowerShell only
+no long explanations during fixing
+minimal text
+precise edits
+READY FOR NEXT CHAT
+
+Paste this into new chat and continue:
+
+Continue FitoutOS backend confirm / tasks generation debugging from handover summary.
