@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,13 +17,20 @@ import {
   Plus,
   TrendingUp,
   Users,
+  Shield,
+  AlertOctagon,
+  Calendar,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { parseISO, isWithinInterval, addDays } from 'date-fns';
 
 export default function DashboardPage() {
   const { user, canManage } = useAuth();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [recentJobs, setRecentJobs] = useState([]);
+  const [allTasks, setAllTasks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,18 +39,74 @@ export default function DashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      const [summaryRes, jobsRes] = await Promise.all([
+      const [summaryRes, jobsRes, tasksRes] = await Promise.all([
         api.get('/dashboard/summary'),
         api.get('/jobs'),
+        api.get('/tasks'),
       ]);
       setSummary(summaryRes.data);
       setRecentJobs(jobsRes.data.slice(0, 5));
+      setAllTasks(tasksRes.data || []);
     } catch (error) {
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
+
+  // Calculate risk metrics from tasks
+  const riskMetrics = useMemo(() => {
+    const now = new Date();
+    const weekFromNow = addDays(now, 7);
+    
+    const blockedTasks = allTasks.filter(t => t.is_blocked || t.status === 'blocked');
+    const criticalTasks = allTasks.filter(t => t.is_critical || t.total_float === 0);
+    const atRiskTasks = allTasks.filter(t => t.delay_risk || t.at_risk || t.status === 'at_risk' || t.status === 'delayed');
+    
+    // Due this week
+    const dueThisWeek = allTasks.filter(task => {
+      if (!task.planned_start) return false;
+      try {
+        const startDate = parseISO(task.planned_start);
+        return isWithinInterval(startDate, { start: now, end: weekFromNow }) && 
+               task.status !== 'complete';
+      } catch { return false; }
+    });
+    
+    return {
+      blocked: blockedTasks,
+      critical: criticalTasks,
+      atRisk: atRiskTasks,
+      dueThisWeek: dueThisWeek,
+    };
+  }, [allTasks]);
+
+  // Get top risks (blocked + critical tasks)
+  const topRisks = useMemo(() => {
+    const risks = [];
+    
+    // Add blocked tasks first (highest priority)
+    riskMetrics.blocked.slice(0, 3).forEach(task => {
+      risks.push({
+        ...task,
+        riskType: 'blocked',
+        riskLabel: 'BLOCKED',
+        riskColor: 'destructive'
+      });
+    });
+    
+    // Add critical tasks
+    riskMetrics.critical.filter(t => !riskMetrics.blocked.some(b => b.id === t.id)).slice(0, 2).forEach(task => {
+      risks.push({
+        ...task,
+        riskType: 'critical',
+        riskLabel: 'CRITICAL',
+        riskColor: 'warning'
+      });
+    });
+    
+    return risks.slice(0, 5);
+  }, [riskMetrics]);
 
   const seedTaskCodes = async () => {
     try {
@@ -114,29 +177,126 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="metric-card warning" data-testid="stat-tasks-soon">
+        <Card className="metric-card danger cursor-pointer hover:border-red-400" data-testid="stat-blocked" onClick={() => navigate('/tasks')}>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Tasks Starting Soon</p>
-                <p className="font-data text-3xl font-bold mt-1">{summary?.tasks_starting_soon || 0}</p>
+                <p className="text-sm font-medium text-muted-foreground">Blocked Tasks</p>
+                <p className="font-data text-3xl font-bold mt-1 text-red-600">{riskMetrics.blocked.length}</p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                <ListTodo className="h-6 w-6 text-amber-500" />
+              <div className="h-12 w-12 rounded-lg bg-red-500/10 flex items-center justify-center">
+                <AlertOctagon className="h-6 w-6 text-red-500" />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="metric-card danger" data-testid="stat-blocked">
+        <Card className="metric-card warning cursor-pointer hover:border-orange-400" data-testid="stat-critical" onClick={() => navigate('/tasks')}>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Blocked Tasks</p>
-                <p className="font-data text-3xl font-bold mt-1">{summary?.blocked_tasks || 0}</p>
+                <p className="text-sm font-medium text-muted-foreground">Critical Path</p>
+                <p className="font-data text-3xl font-bold mt-1 text-orange-600">{riskMetrics.critical.length}</p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-red-500/10 flex items-center justify-center">
-                <AlertTriangle className="h-6 w-6 text-red-500" />
+              <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <Shield className="h-6 w-6 text-orange-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="metric-card cursor-pointer hover:border-amber-400" data-testid="stat-due-week" onClick={() => navigate('/tasks')}>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Due This Week</p>
+                <p className="font-data text-3xl font-bold mt-1">{riskMetrics.dueThisWeek.length}</p>
+              </div>
+              <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <Calendar className="h-6 w-6 text-amber-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Key Risks / Attention Required */}
+      {topRisks.length > 0 && (
+        <Card className="border-l-4 border-l-red-500" data-testid="key-risks-section">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                <CardTitle className="text-lg">Key Risks / Attention Required</CardTitle>
+              </div>
+              <Link to="/tasks">
+                <Button variant="ghost" size="sm">
+                  View All Tasks <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+            <CardDescription>
+              {riskMetrics.blocked.length} blocked, {riskMetrics.critical.length} on critical path
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {topRisks.map((task) => (
+                <div
+                  key={task.id}
+                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/50 cursor-pointer transition-colors"
+                  onClick={() => navigate('/tasks')}
+                  data-testid={`risk-task-${task.id}`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {task.riskType === 'blocked' ? (
+                      <AlertOctagon className="h-5 w-5 text-red-500 flex-shrink-0" />
+                    ) : (
+                      <Shield className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{task.task_name}</p>
+                      {task.blockers && (
+                        <p className="text-xs text-muted-foreground truncate">{task.blockers}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={task.riskColor}>{task.riskLabel}</Badge>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Secondary Stats Row */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="metric-card warning" data-testid="stat-tasks-soon">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">At Risk Tasks</p>
+                <p className="font-data text-3xl font-bold mt-1 text-amber-600">{riskMetrics.atRisk.length}</p>
+              </div>
+              <div className="h-12 w-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6 text-amber-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="metric-card" data-testid="stat-total-tasks">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Tasks</p>
+                <p className="font-data text-3xl font-bold mt-1">{allTasks.length}</p>
+              </div>
+              <div className="h-12 w-12 rounded-lg bg-slate-500/10 flex items-center justify-center">
+                <ListTodo className="h-6 w-6 text-slate-500" />
               </div>
             </div>
           </CardContent>
@@ -151,6 +311,22 @@ export default function DashboardPage() {
               </div>
               <div className="h-12 w-12 rounded-lg bg-green-500/10 flex items-center justify-center">
                 <Clock className="h-6 w-6 text-green-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="metric-card success" data-testid="stat-complete">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Complete</p>
+                <p className="font-data text-3xl font-bold mt-1 text-green-600">
+                  {allTasks.filter(t => t.status === 'complete').length}
+                </p>
+              </div>
+              <div className="h-12 w-12 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <CheckCircle className="h-6 w-6 text-green-500" />
               </div>
             </div>
           </CardContent>
