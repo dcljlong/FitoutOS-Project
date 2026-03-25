@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Sheet,
   SheetContent,
@@ -20,8 +21,14 @@ import {
   AlertTriangle,
   Settings,
   Users,
+  ChevronRight,
+  AlertOctagon,
+  Shield,
+  CheckCircle,
+  ListTodo,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 import GanttChart from '@/components/GanttChart';
 import RiskWarnings from '@/components/RiskWarnings';
@@ -34,7 +41,10 @@ export default function GanttPage() {
   const [programme, setProgramme] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null);
   const [colorBy, setColorBy] = useState('trade');
+  const [showTaskList, setShowTaskList] = useState(true);
+  const taskListRefs = useRef({});
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -59,9 +69,51 @@ export default function GanttPage() {
     fetchData();
   }, [fetchData]);
 
-  // Handle task click
+  // Handle task click - highlight in both Gantt and task list
   const handleTaskClick = (task) => {
     setSelectedTask(task);
+    setHighlightedTaskId(task.id);
+    
+    // Scroll to task in list
+    if (taskListRefs.current[task.id]) {
+      taskListRefs.current[task.id].scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+    }
+    
+    // Auto-clear highlight after 3 seconds
+    setTimeout(() => {
+      setHighlightedTaskId(null);
+    }, 3000);
+  };
+
+  // Handle task click from list - open details
+  const handleTaskListClick = (task) => {
+    setSelectedTask(task);
+    setHighlightedTaskId(task.id);
+    
+    // Auto-clear highlight after 3 seconds
+    setTimeout(() => {
+      setHighlightedTaskId(null);
+    }, 3000);
+  };
+
+  // Get risk badge for task
+  const getTaskRiskBadge = (task) => {
+    if (task.is_blocked || task.status === 'blocked') {
+      return <Badge variant="destructive" className="text-[10px] px-1 py-0"><AlertOctagon className="h-2 w-2" /></Badge>;
+    }
+    if (task.is_critical || task.total_float === 0) {
+      return <Badge className="text-[10px] px-1 py-0 bg-orange-500"><Shield className="h-2 w-2" /></Badge>;
+    }
+    if (task.delay_risk || task.at_risk || task.status === 'at_risk') {
+      return <Badge className="text-[10px] px-1 py-0 bg-amber-500"><AlertTriangle className="h-2 w-2" /></Badge>;
+    }
+    if (task.status === 'complete') {
+      return <Badge variant="outline" className="text-[10px] px-1 py-0 border-green-500 text-green-500"><CheckCircle className="h-2 w-2" /></Badge>;
+    }
+    return null;
   };
 
   // Handle task move (drag)
@@ -175,7 +227,60 @@ export default function GanttPage() {
             showWeekends={true}
             showHolidays={true}
             editable={true}
+            highlightedTaskId={highlightedTaskId}
           />
+          
+          {/* Task List Panel */}
+          <Card className="mt-4" data-testid="gantt-task-list">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ListTodo className="h-4 w-4" />
+                  Task List
+                </CardTitle>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setShowTaskList(!showTaskList)}
+                >
+                  {showTaskList ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </CardHeader>
+            {showTaskList && (
+              <CardContent className="p-0">
+                <ScrollArea className="h-[300px]">
+                  <div className="space-y-1 p-4">
+                    {tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        ref={(el) => taskListRefs.current[task.id] = el}
+                        className={cn(
+                          "flex items-center justify-between p-2 rounded cursor-pointer transition-all duration-300",
+                          "hover:bg-accent/50 border border-transparent",
+                          highlightedTaskId === task.id && "bg-primary/10 border-primary ring-2 ring-primary/20",
+                          (task.is_blocked || task.status === 'blocked') && "border-l-4 border-l-red-500"
+                        )}
+                        onClick={() => handleTaskListClick(task)}
+                        data-testid={`task-list-item-${task.id}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {getTaskRiskBadge(task)}
+                          <span className="text-sm truncate">{task.task_name}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      </div>
+                    ))}
+                    {tasks.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No tasks found
+                      </p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            )}
+          </Card>
         </div>
 
         {/* Sidebar */}

@@ -90,6 +90,7 @@ export default function GanttChart({
   showWeekends = true,
   showHolidays = true,
   editable = false,
+  highlightedTaskId = null,
 }) {
   const [zoom, setZoom] = useState('day'); // 'day', 'week', 'month'
   const [viewStart, setViewStart] = useState(null);
@@ -409,8 +410,10 @@ export default function GanttChart({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="h-10 border-b px-3 flex items-center gap-2 text-sm hover:bg-muted/50 cursor-pointer"
+              className={`h-10 border-b px-3 flex items-center gap-2 text-sm hover:bg-muted/50 cursor-pointer transition-all duration-300
+                ${highlightedTaskId === item.id ? 'bg-primary/20 ring-2 ring-primary/40' : ''}`}
               onClick={() => onTaskClick?.(item.original)}
+              data-testid={`gantt-row-${item.id}`}
             >
               {item.locked && <Lock className="h-3 w-3 text-muted-foreground" />}
               {item.is_blocked && <AlertTriangle className="h-3 w-3 text-red-500" />}
@@ -479,6 +482,7 @@ export default function GanttChart({
                           className={`absolute top-1 h-8 rounded flex items-center px-2 text-white text-xs font-medium
                             ${getItemColor(item)} ${getItemBorderStyle(item)}
                             ${editable && !item.locked ? 'cursor-move' : 'cursor-pointer'}
+                            ${highlightedTaskId === item.id ? 'ring-4 ring-primary scale-105 z-10' : ''}
                             transition-all duration-150 hover:brightness-110`}
                           style={{
                             left: Math.max(0, pos.left),
