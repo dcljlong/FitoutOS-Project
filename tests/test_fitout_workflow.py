@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 import time
 
 # Configuration
-BASE_URL = "https://9c1fa4b6-ed08-4109-ba37-d518630c8ad8.preview.emergentagent.com/api"
+BASE_URL = "https://fitout-stability.preview.emergentagent.com/api"
 TEST_EMAIL = "admin@test.com"
 TEST_PASSWORD = "admin123"
 
