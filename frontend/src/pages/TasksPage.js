@@ -43,6 +43,11 @@ import {
   GripVertical,
   Move,
   Lock,
+  Shield,
+  AlertOctagon,
+  CircleDot,
+  User,
+  CheckSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { 
@@ -60,6 +65,100 @@ import {
   subWeeks,
 } from 'date-fns';
 import { cn } from '@/lib/utils';
+
+// Risk status badge component
+const RiskStatusBadge = ({ task }) => {
+  // Priority: blocked > critical > at-risk > on-track
+  if (task.is_blocked || task.status === 'blocked') {
+    return (
+      <Badge variant="destructive" className="gap-1" data-testid={`badge-blocked-${task.id}`}>
+        <AlertOctagon className="h-3 w-3" />
+        BLOCKED
+      </Badge>
+    );
+  }
+  if (task.is_critical || task.total_float === 0) {
+    return (
+      <Badge className="gap-1 bg-orange-500 hover:bg-orange-600" data-testid={`badge-critical-${task.id}`}>
+        <Shield className="h-3 w-3" />
+        CRITICAL
+      </Badge>
+    );
+  }
+  if (task.delay_risk || task.at_risk || task.status === 'at_risk' || task.status === 'delayed') {
+    return (
+      <Badge className="gap-1 bg-amber-500 hover:bg-amber-600 text-black" data-testid={`badge-atrisk-${task.id}`}>
+        <AlertTriangle className="h-3 w-3" />
+        AT RISK
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="gap-1 border-green-500 text-green-600" data-testid={`badge-ontrack-${task.id}`}>
+      <CheckCircle className="h-3 w-3" />
+      ON TRACK
+    </Badge>
+  );
+};
+
+// Task indicators component (checklist, predecessor, owner)
+const TaskIndicators = ({ task }) => {
+  const indicators = [];
+  
+  // Incomplete checklist
+  if (task.has_incomplete_checklist || (task.pre_start_checklist && task.pre_start_checklist.some(item => !item.checked))) {
+    indicators.push(
+      <TooltipProvider key="checklist">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-1 text-amber-600 text-xs">
+              <CheckSquare className="h-3 w-3" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Checklist incomplete</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  
+  // Predecessor count
+  if (task.predecessor_ids && task.predecessor_ids.length > 0) {
+    indicators.push(
+      <TooltipProvider key="predecessor">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-1 text-blue-600 text-xs">
+              <CircleDot className="h-3 w-3" />
+              {task.predecessor_ids.length}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{task.predecessor_ids.length} predecessor(s)</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  
+  // Prerequisite owner
+  if (task.prerequisite_owner) {
+    indicators.push(
+      <TooltipProvider key="owner">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-1 text-purple-600 text-xs">
+              <User className="h-3 w-3" />
+              {task.prerequisite_owner}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Prerequisite owner: {task.prerequisite_owner}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  
+  return indicators.length > 0 ? (
+    <div className="flex items-center gap-2">{indicators}</div>
+  ) : null;
+};
 
 // Gantt Chart Component with Drag-and-Drop
 const GanttChart = ({ tasks, jobs, startDate, endDate, onTaskClick, onTaskUpdate, canEdit }) => {
@@ -394,6 +493,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState('all');
+  const [riskFilter, setRiskFilter] = useState('all'); // 'all', 'blocked', 'critical', 'at_risk'
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'gantt'
   
@@ -407,6 +507,34 @@ export default function TasksPage() {
   const [savingReschedule, setSavingReschedule] = useState(false);
 
   const ganttEnd = useMemo(() => addDays(ganttStart, ganttWeeks * 7 - 1), [ganttStart, ganttWeeks]);
+
+  // Filter tasks by risk status
+  const filteredTasks = useMemo(() => {
+    if (riskFilter === 'all') return tasks;
+    
+    return tasks.filter(task => {
+      if (riskFilter === 'blocked') {
+        return task.is_blocked || task.status === 'blocked';
+      }
+      if (riskFilter === 'critical') {
+        return task.is_critical || task.total_float === 0;
+      }
+      if (riskFilter === 'at_risk') {
+        return task.delay_risk || task.at_risk || task.status === 'at_risk' || task.status === 'delayed';
+      }
+      return true;
+    });
+  }, [tasks, riskFilter]);
+
+  // Calculate risk counts for filter badges
+  const riskCounts = useMemo(() => {
+    return {
+      blocked: tasks.filter(t => t.is_blocked || t.status === 'blocked').length,
+      critical: tasks.filter(t => t.is_critical || t.total_float === 0).length,
+      at_risk: tasks.filter(t => t.delay_risk || t.at_risk || t.status === 'at_risk' || t.status === 'delayed').length,
+      total: tasks.length
+    };
+  }, [tasks]);
 
 
   const fetchData = async () => {
@@ -620,7 +748,7 @@ const cancelReschedule = () => {
           <h1 className="text-3xl font-bold font-['Manrope']">Tasks</h1>
           <p className="text-muted-foreground mt-1">View and manage project tasks</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* View Toggle */}
           <div className="flex border rounded-lg p-1">
             <Button
@@ -643,7 +771,36 @@ const cancelReschedule = () => {
             </Button>
           </div>
           
-          <Filter className="h-4 w-4 text-muted-foreground" />
+          {/* Risk Filter */}
+          <Select value={riskFilter} onValueChange={setRiskFilter}>
+            <SelectTrigger className="w-[160px]" data-testid="risk-filter">
+              <Filter className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Filter by risk" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Tasks ({riskCounts.total})</SelectItem>
+              <SelectItem value="blocked">
+                <span className="flex items-center gap-2">
+                  <AlertOctagon className="h-3 w-3 text-red-500" />
+                  Blocked ({riskCounts.blocked})
+                </span>
+              </SelectItem>
+              <SelectItem value="critical">
+                <span className="flex items-center gap-2">
+                  <Shield className="h-3 w-3 text-orange-500" />
+                  Critical ({riskCounts.critical})
+                </span>
+              </SelectItem>
+              <SelectItem value="at_risk">
+                <span className="flex items-center gap-2">
+                  <AlertTriangle className="h-3 w-3 text-amber-500" />
+                  At Risk ({riskCounts.at_risk})
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          
+          {/* Job Filter */}
           <Select value={selectedJob} onValueChange={setSelectedJob}>
             <SelectTrigger className="w-[250px]" data-testid="job-filter">
               <SelectValue placeholder="Filter by job" />
@@ -781,7 +938,8 @@ const cancelReschedule = () => {
           <CardHeader>
             <CardTitle className="text-lg">All Tasks</CardTitle>
             <CardDescription>
-              {tasks.length} task{tasks.length !== 1 ? 's' : ''} total
+              {filteredTasks.length} task{filteredTasks.length !== 1 ? 's' : ''} 
+              {riskFilter !== 'all' && ` (filtered by ${riskFilter.replace('_', ' ')})`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -789,34 +947,41 @@ const cancelReschedule = () => {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : tasks.length === 0 ? (
+            ) : filteredTasks.length === 0 ? (
               <div className="text-center py-12">
                 <ListTodo className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-medium">No tasks found</h3>
                 <p className="text-muted-foreground mt-2">
-                  {selectedJob === 'all' 
-                    ? 'Tasks will appear here once created via job setup'
-                    : 'No tasks for the selected job'}
+                  {riskFilter !== 'all' 
+                    ? `No ${riskFilter.replace('_', ' ')} tasks found`
+                    : selectedJob === 'all' 
+                      ? 'Tasks will appear here once created via job setup'
+                      : 'No tasks for the selected job'}
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
-                {tasks.map((task) => (
+                {filteredTasks.map((task) => (
                   <div
                     key={task.id}
-                    className="flex items-center gap-4 p-4 rounded-lg border hover:bg-accent/50 transition-colors"
+                    className={cn(
+                      "flex items-center gap-4 p-4 rounded-lg border hover:bg-accent/50 transition-colors",
+                      (task.is_blocked || task.status === 'blocked') && "border-red-300 bg-red-50/50 dark:bg-red-900/10",
+                      (task.is_critical || task.total_float === 0) && "border-orange-300 bg-orange-50/50 dark:bg-orange-900/10"
+                    )}
                     data-testid={`task-row-${task.id}`}
                   >
                     {getStatusIcon(task.status)}
                     
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h3 className="font-medium truncate">{task.task_name}</h3>
                         <Badge variant="outline" className="text-xs">
                           {getJobName(task.job_id)}
                         </Badge>
+                        <RiskStatusBadge task={task} />
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
                         {task.planned_start && (
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
@@ -826,21 +991,17 @@ const cancelReschedule = () => {
                         {task.duration_days && (
                           <span>{task.duration_days} days</span>
                         )}
-                        {task.linked_task_codes?.length > 0 && (
-                          <span className="flex items-center gap-1">
-                            Codes: {task.linked_task_codes.join(', ')}
-                          </span>
-                        )}
+                        <TaskIndicators task={task} />
                       </div>
                     </div>
 
-                    <div className="text-right">
+                    <div className="text-right flex flex-col items-end gap-1">
                       <Badge variant={getStatusBadgeVariant(task.status)}>
                         {task.status}
                       </Badge>
                       {task.percent_complete > 0 && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {task.percent_complete}% complete
+                        <p className="text-sm text-muted-foreground">
+                          {task.percent_complete}%
                         </p>
                       )}
                     </div>
