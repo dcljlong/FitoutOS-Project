@@ -60,6 +60,23 @@ const STATUS_COLORS = {
   'complete': 'bg-emerald-600',
 };
 
+// Risk level colors for Gantt highlighting (priority order: blocked > critical > at-risk > normal)
+const RISK_COLORS = {
+  blocked: { bg: 'bg-red-600', border: 'border-red-700', text: 'text-white', pattern: 'blocked' },
+  critical: { bg: 'bg-orange-500', border: 'border-orange-600', text: 'text-white', pattern: 'critical' },
+  at_risk: { bg: 'bg-amber-500', border: 'border-amber-600', text: 'text-black', pattern: 'at_risk' },
+  normal: { bg: 'bg-blue-500', border: 'border-blue-600', text: 'text-white', pattern: 'normal' },
+};
+
+// Determine task risk level with priority override
+const getTaskRiskLevel = (item) => {
+  // Priority: blocked > critical > at-risk > normal
+  if (item.is_blocked || item.status === 'blocked') return 'blocked';
+  if (item.is_critical || item.total_float === 0) return 'critical';
+  if (item.delay_risk || item.at_risk || item.status === 'at_risk' || item.status === 'delayed') return 'at_risk';
+  return 'normal';
+};
+
 export default function GanttChart({
   tasks = [],
   programme = [],
@@ -202,16 +219,30 @@ export default function GanttChart({
     };
   };
 
-  // Get color for item
+  // Get color for item based on risk level and color mode
   const getItemColor = (item) => {
-    if (item.is_blocked) return 'bg-red-500';
-    if (item.is_critical) return 'bg-orange-500';
+    const riskLevel = getTaskRiskLevel(item);
     
+    // Always show risk colors for blocked/critical/at-risk
+    if (riskLevel === 'blocked') return RISK_COLORS.blocked.bg;
+    if (riskLevel === 'critical') return RISK_COLORS.critical.bg;
+    if (riskLevel === 'at_risk') return RISK_COLORS.at_risk.bg;
+    
+    // For normal tasks, use selected color mode
     if (colorBy === 'status') {
       return STATUS_COLORS[item.status] || STATUS_COLORS.planned;
     }
     
     return TRADE_COLORS[item.trade] || TRADE_COLORS.default;
+  };
+
+  // Get border style for item based on risk
+  const getItemBorderStyle = (item) => {
+    const riskLevel = getTaskRiskLevel(item);
+    if (riskLevel === 'blocked') return 'border-2 border-red-700 ring-2 ring-red-300';
+    if (riskLevel === 'critical') return 'border-2 border-orange-600 ring-1 ring-orange-300';
+    if (riskLevel === 'at_risk') return 'border border-amber-600';
+    return '';
   };
 
   // Navigation handlers
@@ -446,15 +477,17 @@ export default function GanttChart({
                       <TooltipTrigger asChild>
                         <div
                           className={`absolute top-1 h-8 rounded flex items-center px-2 text-white text-xs font-medium
-                            ${getItemColor(item)} ${editable && !item.locked ? 'cursor-move' : 'cursor-pointer'}
-                            ${item.is_blocked ? 'opacity-75 border-2 border-red-600' : ''}
-                            ${item.is_critical ? 'ring-2 ring-orange-400' : ''}`}
+                            ${getItemColor(item)} ${getItemBorderStyle(item)}
+                            ${editable && !item.locked ? 'cursor-move' : 'cursor-pointer'}
+                            transition-all duration-150 hover:brightness-110`}
                           style={{
                             left: Math.max(0, pos.left),
                             width: Math.max(24, pos.width),
                           }}
                           onClick={() => onTaskClick?.(item.original)}
                           onMouseDown={(e) => handleMouseDown(e, item, 'move')}
+                          data-testid={`gantt-task-${item.id}`}
+                          data-risk-level={getTaskRiskLevel(item)}
                         >
                           <span className="truncate">{item.name}</span>
                           
@@ -507,11 +540,29 @@ export default function GanttChart({
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 p-3 border-t bg-muted/30 text-xs">
-        <span className="font-medium">Legend:</span>
+      <div className="flex flex-wrap items-center gap-4 p-3 border-t bg-muted/30 text-xs" data-testid="gantt-legend">
+        <span className="font-medium">Risk Indicators:</span>
+        <div className="flex items-center gap-1">
+          <div className="w-4 h-3 rounded bg-red-600 border-2 border-red-700" />
+          <span>Blocked</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-4 h-3 rounded bg-orange-500 border border-orange-600 ring-1 ring-orange-300" />
+          <span>Critical Path</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-4 h-3 rounded bg-amber-500" />
+          <span>At Risk</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-4 h-3 rounded bg-blue-500" />
+          <span>On Track</span>
+        </div>
+        
+        <span className="font-medium ml-4 border-l pl-4">Color By:</span>
         {colorBy === 'trade' ? (
           <>
-            {Object.entries(TRADE_COLORS).filter(([k]) => k !== 'default').map(([trade, color]) => (
+            {Object.entries(TRADE_COLORS).filter(([k]) => k !== 'default').slice(0, 4).map(([trade, color]) => (
               <div key={trade} className="flex items-center gap-1">
                 <div className={`w-3 h-3 rounded ${color}`} />
                 <span>{trade}</span>
@@ -520,7 +571,7 @@ export default function GanttChart({
           </>
         ) : (
           <>
-            {Object.entries(STATUS_COLORS).map(([status, color]) => (
+            {Object.entries(STATUS_COLORS).slice(0, 4).map(([status, color]) => (
               <div key={status} className="flex items-center gap-1">
                 <div className={`w-3 h-3 rounded ${color}`} />
                 <span className="capitalize">{status.replace('_', ' ')}</span>
@@ -529,7 +580,7 @@ export default function GanttChart({
           </>
         )}
         {showWeekends && (
-          <div className="flex items-center gap-1 ml-4">
+          <div className="flex items-center gap-1 ml-4 border-l pl-4">
             <div className="w-3 h-3 bg-slate-200 dark:bg-slate-700 rounded" />
             <span>Weekend</span>
           </div>
