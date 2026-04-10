@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
+﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -16,7 +16,12 @@ import bcrypt
 import jwt
 import json
 import xlrd
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+try:
+    EMERGENT_AVAILABLE = True
+except ImportError:
+    LlmChat = None
+    UserMessage = None
+    EMERGENT_AVAILABLE = False
 from programme_parser import parse_uploaded_file
 
 ROOT_DIR = Path(__file__).parent
@@ -558,10 +563,15 @@ class ScopeItemResponse(BaseModel):
 class TimesheetRowCreate(BaseModel):
     date: str
     job_id: Optional[str] = None
-    task_code_id: str
+    job_number: Optional[str] = None
+    task_id: Optional[str] = None
+    task_name: Optional[str] = None
+    task_code_id: Optional[str] = None
+    task_code: Optional[str] = None
     description: Optional[str] = None
     hours: float
     fallback_reason: Optional[str] = None
+    entry_type: str = "Work"
 
 
 class TimesheetCreate(BaseModel):
@@ -576,13 +586,16 @@ class TimesheetRowResponse(BaseModel):
     job_id: Optional[str] = None
     job_number: Optional[str] = None
     job_name: Optional[str] = None
-    task_code_id: str
-    task_code: str
-    task_code_name: str
+    task_id: Optional[str] = None
+    task_name: Optional[str] = None
+    task_code_id: Optional[str] = None
+    task_code: Optional[str] = None
+    task_code_name: Optional[str] = None
     description: Optional[str] = None
     hours: float
     status: str
     fallback_reason: Optional[str] = None
+    entry_type: str = "Work"
     submitted_at: Optional[str] = None
     approved_at: Optional[str] = None
     approved_by: Optional[str] = None
@@ -759,9 +772,9 @@ async def register(user_data: UserCreate):
 
 @api_router.post("/auth/login", response_model=TokenResponse)
 async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email})
-    # Support both 'password' and 'hashed_password' field names
-    stored_password = user.get("password") or user.get("hashed_password") if user else None
+    email = credentials.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    stored_password = (user.get("password") or user.get("hashed_password") or user.get("password_hash")) if user else None
     if not user or not stored_password or not verify_password(credentials.password, stored_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -817,6 +830,7 @@ async def create_job(job_data: JobCreate, user: dict = Depends(require_roles(Use
         job_code = {
             "id": str(uuid.uuid4()),
             "job_id": job_id,
+            "task_code": task_code_value or None,
             "master_code_id": master_code["id"],
             "code": master_code["code"],
             "name": master_code["name"],
@@ -1479,43 +1493,103 @@ async def get_job_critical_path(job_id: str, user: dict = Depends(get_current_us
 async def create_timesheet_entries(timesheet_data: TimesheetCreate, user: dict = Depends(get_current_user)):
     entries = []
     for row in timesheet_data.rows:
-        # Validate job if provided
         job = None
+        task = None
         task_code_info = None
+        entry_type = (row.entry_type or "Work").strip()
+        is_non_work = entry_type in ["Annual Leave", "Public Holiday"]
 
-        if row.job_id:
-            job = await db.jobs.find_one({"id": row.job_id}, {"_id": 0})
-            if not job:
-                raise HTTPException(status_code=400, detail=f"Job not found: {row.job_id}")
+        if not is_non_work:
+            resolved_job_id = row.job_id
+            resolved_task_id = row.task_id
+            resolved_task_code_id = row.task_code_id
+            resolved_task_code = row.task_code
 
-            # First check if it's a job-specific code
-            job_code = await db.job_task_codes.find_one({"id": row.task_code_id, "job_id": row.job_id, "is_active": True}, {"_id": 0})
-            if job_code:
-                task_code_info = {"code": job_code["code"], "name": job_code.get("custom_label") or job_code["name"]}
-            else:
-                # Check if it's a fallback code (allowed even with job selected)
-                master_code = await db.master_task_codes.find_one({"id": row.task_code_id, "is_global_fallback": True}, {"_id": 0})
-                if master_code:
-                    task_code_info = {"code": master_code["code"], "name": master_code["name"]}
+            if not resolved_job_id and row.job_number:
+                job = await db.jobs.find_one({"job_number": row.job_number}, {"_id": 0})
+                if job:
+                    resolved_job_id = job["id"]
+
+            if resolved_job_id and not job:
+                job = await db.jobs.find_one({"id": resolved_job_id}, {"_id": 0})
+
+            if resolved_job_id and not job:
+                raise HTTPException(status_code=400, detail=f"Job not found: {resolved_job_id}")
+
+            if not resolved_task_code_id and resolved_task_code:
+                if resolved_job_id:
+                    matched_job_code = await db.job_task_codes.find_one(
+                        {"job_id": resolved_job_id, "code": resolved_task_code, "is_active": True},
+                        {"_id": 0}
+                    )
+                    if matched_job_code:
+                        resolved_task_code_id = matched_job_code["id"]
+
+                if not resolved_task_code_id:
+                    matched_master_code = await db.master_task_codes.find_one(
+                        {"code": resolved_task_code},
+                        {"_id": 0}
+                    )
+                    if matched_master_code:
+                        resolved_task_code_id = matched_master_code["id"]
+
+            if not resolved_task_code_id:
+                raise HTTPException(status_code=400, detail="Task code required for work entries")
+
+            if resolved_job_id and resolved_task_code_id and not resolved_task_id:
+                task = await db.tasks.find_one(
+                    {"job_id": resolved_job_id, "linked_task_codes": resolved_task_code_id},
+                    {"_id": 0}
+                )
+                if task:
+                    resolved_task_id = task["id"]
+
+            if resolved_job_id and resolved_task_id and not task:
+                task = await db.tasks.find_one(
+                    {"id": resolved_task_id, "job_id": resolved_job_id},
+                    {"_id": 0}
+                )
+                if not task:
+                    raise HTTPException(status_code=400, detail="Selected programme task not found for this job")
+
+            if resolved_job_id:
+                job_code = await db.job_task_codes.find_one(
+                    {"id": resolved_task_code_id, "job_id": resolved_job_id, "is_active": True},
+                    {"_id": 0}
+                )
+                if job_code:
+                    task_code_info = {"code": job_code["code"], "name": job_code.get("custom_label") or job_code["name"]}
                 else:
-                    # Check if task_code_id is actually a master code id that should be added to job
-                    any_master = await db.master_task_codes.find_one({"id": row.task_code_id}, {"_id": 0})
-                    if any_master:
-                        task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+                    master_code = await db.master_task_codes.find_one(
+                        {"id": resolved_task_code_id, "is_global_fallback": True},
+                        {"_id": 0}
+                    )
+                    if master_code:
+                        task_code_info = {"code": master_code["code"], "name": master_code["name"]}
                     else:
-                        raise HTTPException(status_code=400, detail=f"Task code not found or not active for this job")
-        else:
-            # No job - must use fallback code
-            master_code = await db.master_task_codes.find_one({"id": row.task_code_id, "is_global_fallback": True}, {"_id": 0})
-            if not master_code:
-                # Also allow any master code as fallback when no job
-                any_master = await db.master_task_codes.find_one({"id": row.task_code_id}, {"_id": 0})
-                if any_master:
-                    task_code_info = {"code": any_master["code"], "name": any_master["name"]}
-                else:
-                    raise HTTPException(status_code=400, detail="Invalid task code")
+                        any_master = await db.master_task_codes.find_one({"id": resolved_task_code_id}, {"_id": 0})
+                        if any_master:
+                            task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+                        else:
+                            raise HTTPException(status_code=400, detail="Task code not found or not active for this job")
             else:
-                task_code_info = {"code": master_code["code"], "name": master_code["name"]}
+                master_code = await db.master_task_codes.find_one(
+                    {"id": resolved_task_code_id, "is_global_fallback": True},
+                    {"_id": 0}
+                )
+                if not master_code:
+                    any_master = await db.master_task_codes.find_one({"id": resolved_task_code_id}, {"_id": 0})
+                else:
+                    any_master = master_code
+
+                if not any_master:
+                    raise HTTPException(status_code=400, detail="Task code not found")
+
+                task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+
+            row.job_id = resolved_job_id
+            row.task_id = resolved_task_id
+            row.task_code_id = resolved_task_code_id
 
         entry_id = str(uuid.uuid4())
         entry = {
@@ -1523,16 +1597,19 @@ async def create_timesheet_entries(timesheet_data: TimesheetCreate, user: dict =
             "user_id": user["id"],
             "user_name": user["name"],
             "date": row.date,
-            "job_id": row.job_id,
-            "job_number": job["job_number"] if job else None,
-            "job_name": job["job_name"] if job else None,
-            "task_code_id": row.task_code_id,
-            "task_code": task_code_info["code"],
-            "task_code_name": task_code_info["name"],
-            "description": row.description,
+            "job_id": None if is_non_work else row.job_id,
+            "job_number": None if is_non_work else ((job["job_number"] if job else None) or row.job_number),
+            "job_name": None if is_non_work else (job["job_name"] if job else None),
+            "task_id": None if is_non_work else row.task_id,
+            "task_name": None if is_non_work else (task["task_name"] if task else row.task_name),
+            "task_code_id": None if is_non_work else row.task_code_id,
+            "task_code": None if is_non_work else task_code_info["code"],
+            "task_code_name": None if is_non_work else task_code_info["name"],
+            "description": None if is_non_work else row.description,
             "hours": row.hours,
             "status": "draft",
-            "fallback_reason": row.fallback_reason,
+            "fallback_reason": None if is_non_work else row.fallback_reason,
+            "entry_type": entry_type,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "submitted_at": None,
             "approved_at": None,
@@ -1590,7 +1667,7 @@ async def submit_timesheets(entry_ids: List[str], user: dict = Depends(get_curre
 
 
 @api_router.post("/timesheets/approve")
-async def approve_timesheets(entry_ids: List[str], user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+async def approve_timesheets(entry_ids: List[str], user: dict = Depends(get_current_user)):
     entries = await db.timesheets.find(
         {"id": {"$in": entry_ids}, "status": "submitted"},
         {"_id": 0}
@@ -2078,13 +2155,14 @@ async def get_parsed_programme(job_id: str, user: dict = Depends(get_current_use
 @api_router.post("/jobs/{job_id}/analyze")
 async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
 
-    job = await db.jobs.find_one({"id": job_id})
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
 
     extracted_text = ""
+    readable_files = []
 
     for f in files:
         try:
@@ -2093,122 +2171,347 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
             if filepath.endswith(".xls"):
                 wb = xlrd.open_workbook(f["filepath"])
                 for sheet in wb.sheets():
-                    for row_idx in range(min(sheet.nrows, 100)):
+                    for row_idx in range(min(sheet.nrows, 200)):
                         row_values = sheet.row_values(row_idx)
                         extracted_text += " | ".join([str(v) for v in row_values if str(v).strip()]) + "\n"
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".pdf"):
+                import fitz
+                doc = fitz.open(f["filepath"])
+                for page in doc:
+                    extracted_text += page.get_text()
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".xlsx"):
+                from openpyxl import load_workbook
+                wb = load_workbook(f["filepath"], data_only=True)
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        extracted_text += " | ".join([str(v) for v in row if v is not None and str(v).strip()]) + "\n"
+                readable_files.append(f.get("filename"))
 
             else:
                 with open(f["filepath"], "rb") as fh:
                     content = fh.read().decode(errors="ignore")
-                    extracted_text += content[:5000]
+                    extracted_text += content[:10000]
+                readable_files.append(f.get("filename"))
 
         except Exception:
-            pass
+            continue
 
-    if not extracted_text.strip():
+    extracted_text = (extracted_text or "").strip()
+    if not extracted_text:
         extracted_text = "No readable document content."
 
-    prompt = f"""
-You are a construction project analyst for commercial interior fitouts.
+    text_lower = extracted_text.lower()
+    raw_lines = [line.strip() for line in extracted_text.splitlines()]
+    lines_clean = [line for line in raw_lines if line and len(line) > 3]
 
-CRITICAL RULE:
-Only extract tasks that belong to the contractor performing the interior fitout scope.
-Do NOT generate generic project lifecycle tasks.
+    package_keywords = {
+        "partitions": ["partition", "partitions", "steel stud", "stud partition", "framing"],
+        "linings": ["lining", "linings", "gib", "plasterboard", "wall linings"],
+        "stopping": ["stopping", "stopped", "skim coat", "skim", "stopt"],
+        "ceilings": ["ceiling", "ceilings", "grid", "tile", "pelmet", "ceiling tile"],
+        "insulation": ["insulation", "insulate", "batts", "rockwool", "kooltherm", "stratocell"],
+        "aluminium": ["aluminium", "aluminum", "glazing", "glass", "window", "internal glazing"],
+        "feature_works": ["feature", "featurecraft", "bulkhead", "custom made", "pelmet"],
+        "acoustic_systems": ["acoustic", "acoustic panel", "acoustic ceiling", "noise line", "nosieline"],
+    }
 
-STRICT SCOPE FILTER:
-Only include activities clearly belonging to this contractor's package such as:
-- steel stud framing
-- wall linings
-- stopping
-- ceilings
-- insulation
-- aluminium / glazing where explicitly mentioned
+    task_code_map = {
+        "partitions": {"code": "103", "name": "Partitions"},
+        "linings": {"code": "105", "name": "Linings"},
+        "stopping": {"code": "106", "name": "Stopping"},
+        "ceilings": {"code": "102", "name": "Ceilings"},
+        "insulation": {"code": "107", "name": "Insulation"},
+        "aluminium": {"code": "104", "name": "Aluminium / Glazing"},
+        "feature_works": {"code": "108", "name": "Feature Works"},
+        "acoustic_systems": {"code": "114", "name": "Acoustic Systems"},
+    }
 
-DO NOT generate tasks for:
-- site establishment
-- demolition
-- services rough-in
-- painting unless explicitly included
-- final clean
-- defects or touchups
-- handover
-- material delivery
-- work by other trades
+    detected_packages = []
+    for package_name, keywords in package_keywords.items():
+        if any(keyword in text_lower for keyword in keywords):
+            detected_packages.append(package_name)
 
-If an activity is not clearly awarded to this contractor, exclude it.
+    scope_items = []
+    exclusions = []
+    risks = []
+    dependencies = []
+    materials = []
 
-Return JSON with:
-job_summary
-scope_items
-proposed_tasks
-proposed_task_codes
-proposed_programme
-materials
-subcontractors
-dependencies
-risks
+    material_keywords = [
+        "steel stud", "gib board", "plasterboard", "ceiling tile", "grid",
+        "rockwool", "kooltherm", "stratocell", "acoustic batten", "skirting"
+    ]
 
-The programme must ONLY include tasks directly related to the contractor's quoted scope.
+    risk_keywords = [
+        "lead time", "traffic management", "crane", "hiab", "variation",
+        "by others", "clarified", "fire engineer", "offsite payment", "provisional sum"
+    ]
 
-Example:
+    seen_scope = set()
+    seen_exclusions = set()
+    seen_risks = set()
+    seen_dependencies = set()
+    seen_materials = set()
 
-proposed_programme: [
-  {{
-    "id": "prog-001",
-    "name": "Site measure and set out",
-    "phase": "Preliminaries",
-    "trade": "Site",
-    "duration": 1,
-    "duration_unit": "days",
-    "depends_on": [],
-    "confidence": "high"
-  }},
-  {{
-    "id": "prog-002",
-    "name": "Delivery and staging of materials",
-    "phase": "Preliminaries",
-    "trade": "Logistics",
-    "duration": 1,
-    "duration_unit": "days",
-    "depends_on": ["prog-001"],
-    "confidence": "high"
-  }},
-  {{
-    "id": "prog-003",
-    "name": "Install gib board wall linings",
-    "phase": "Construction",
-    "trade": "Drywall/Gib Fixing",
-    "duration": 5,
-    "duration_unit": "days",
-    "depends_on": ["prog-002"],
-    "confidence": "high"
-  }}
-]
+    def detect_package_for_line(line_lower):
+        for package_name, keywords in package_keywords.items():
+            if any(keyword in line_lower for keyword in keywords):
+                return package_name
+        return None
 
-DOCUMENT CONTENT:
-{extracted_text}
-"""
+    for line in lines_clean:
+        line_lower = line.lower()
 
-    # Use emergentintegrations for LLM call
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"analyze-job-{job_id}",
-        system_message="You are a construction project analyst. Always respond with valid JSON."
-    ).with_model("openai", "gpt-4.1-mini")
-    
-    user_message = UserMessage(text=prompt)
-    text = await chat.send_message(user_message)
-    text = text.strip()
+        matched_package = detect_package_for_line(line_lower)
 
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:].strip()
+        if matched_package and len(line) <= 300:
+            if (
+                "allow" in line_lower
+                or "included" in line_lower
+                or "we have included" in line_lower
+                or "we have allowed" in line_lower
+                or "pricing is based" in line_lower
+                or "level " in line_lower
+            ):
+                key = line_lower
+                if key not in seen_scope:
+                    scope_items.append({
+                        "description": line,
+                        "package": matched_package,
+                        "confidence": "medium"
+                    })
+                    seen_scope.add(key)
 
-    try:
-        analysis = json.loads(text)
-    except Exception:
-        analysis = {"raw_response": text}
+        if (
+            "no allowance" in line_lower
+            or "excluded" in line_lower
+            or "by others" in line_lower
+            or "not allowed" in line_lower
+        ):
+            key = line_lower
+            if key not in seen_exclusions:
+                exclusions.append({
+                    "description": line,
+                    "package": matched_package,
+                    "confidence": "high" if ("no allowance" in line_lower or "by others" in line_lower) else "medium"
+                })
+                seen_exclusions.add(key)
+
+        if any(keyword in line_lower for keyword in risk_keywords):
+            key = line_lower
+            if key not in seen_risks:
+                risks.append({
+                    "description": line,
+                    "severity": "medium",
+                    "confidence": "medium"
+                })
+                seen_risks.add(key)
+
+        if (
+            "provided by main contractor" in line_lower
+            or "by main contractor" in line_lower
+            or "provided by others" in line_lower
+            or "by others" in line_lower
+            or "service contractor" in line_lower
+            or "fire engineer" in line_lower
+        ):
+            key = line_lower
+            if key not in seen_dependencies:
+                dependencies.append({
+                    "description": line,
+                    "confidence": "medium"
+                })
+                seen_dependencies.add(key)
+
+        for material_keyword in material_keywords:
+            if material_keyword in line_lower:
+                if material_keyword not in seen_materials:
+                    materials.append({
+                        "name": material_keyword.title(),
+                        "confidence": "medium"
+                    })
+                    seen_materials.add(material_keyword)
+
+    proposed_task_codes = []
+    for package_name in detected_packages:
+        if package_name in task_code_map:
+            proposed_task_codes.append(task_code_map[package_name])
+
+    proposed_tasks = []
+    for code_info in proposed_task_codes:
+        proposed_tasks.append({
+            "name": code_info["name"],
+            "type": "trade_package",
+            "suggested_codes": [code_info["code"]],
+            "confidence": "medium"
+        })
+
+    programme_sequence = [
+        ("partitions", "Site measure and set out", "Preliminaries", "Site", 1),
+        ("partitions", "Steel stud framing", "Construction", "Partitions", 5),
+        ("linings", "Wall linings installation", "Construction", "Linings", 5),
+        ("insulation", "Install insulation", "Construction", "Insulation", 2),
+        ("stopping", "Stopping and finishing", "Finishing", "Stopping", 4),
+        ("ceilings", "Ceiling framing and grid", "Construction", "Ceilings", 4),
+        ("ceilings", "Install ceiling tiles and finishes", "Finishing", "Ceilings", 3),
+        ("aluminium", "Internal glazing / aluminium works", "Construction", "Aluminium / Glazing", 4),
+        ("feature_works", "Feature works and bulkheads", "Construction", "Feature Works", 3),
+        ("acoustic_systems", "Acoustic systems install", "Construction", "Acoustic Systems", 3),
+    ]
+
+    proposed_programme = []
+    prev_id = None
+    prog_index = 1
+
+    for package_name, task_name, phase, trade, duration in programme_sequence:
+        if package_name not in detected_packages:
+            continue
+
+        prog_id = f"prog-{prog_index:03d}"
+        proposed_programme.append({
+            "id": prog_id,
+            "name": task_name,
+            "phase": phase,
+            "trade": trade,
+            "duration": duration,
+            "duration_unit": "days",
+            "depends_on": [prev_id] if prev_id else [],
+            "confidence": "medium"
+        })
+        prev_id = prog_id
+        prog_index += 1
+
+    # -------------------------------
+    # CONTRACT SPLIT V1
+    # -------------------------------
+    base_build_items = []
+    fitout_items = []
+    shared_dependencies = []
+
+    base_build_terms = [
+        "basebuild", "base build", "primary structure", "structure", "slab"
+    ]
+
+    shared_terms = [
+        "by others", "main contractor", "provided by", "crane", "hiab",
+        "access", "traffic management", "scaffold", "scaffolding", "passive fire"
+    ]
+
+    for item in scope_items:
+        text = (item.get("description") or "").lower()
+
+        if any(term in text for term in shared_terms):
+            shared_dependencies.append({
+                "description": item.get("description"),
+                "confidence": item.get("confidence", "medium")
+            })
+        elif any(term in text for term in base_build_terms):
+            base_build_items.append(item)
+        else:
+            fitout_items.append(item)
+
+    for dep in dependencies:
+        text = (dep.get("description") or "").lower()
+        if any(term in text for term in shared_terms):
+            shared_dependencies.append(dep)
+
+    unique_base_build = []
+    seen_base_build = set()
+    for item in base_build_items:
+        key = (item.get("description") or "").strip().lower()
+        if key and key not in seen_base_build:
+            seen_base_build.add(key)
+            unique_base_build.append(item)
+
+    unique_fitout = []
+    seen_fitout = set()
+    for item in fitout_items:
+        key = (item.get("description") or "").strip().lower()
+        if key and key not in seen_fitout:
+            seen_fitout.add(key)
+            unique_fitout.append(item)
+
+    unique_shared = []
+    seen_shared = set()
+    for item in shared_dependencies:
+        key = (item.get("description") or "").strip().lower()
+        if key and key not in seen_shared:
+            seen_shared.add(key)
+            unique_shared.append(item)
+
+    base_build_items = unique_base_build
+    fitout_items = unique_fitout
+    shared_dependencies = unique_shared
+    # -------------------------------
+    # LD RISK ENGINE V1
+    # -------------------------------
+    high_risk_tasks = []
+    external_dependencies = []
+
+    for item in fitout_items:
+        desc = (item.get("description") or "").lower()
+
+        if any(x in desc for x in ["ceiling", "partition", "lining", "finish"]):
+            high_risk_tasks.append({
+                "description": item.get("description"),
+                "risk": "LD exposure",
+                "confidence": item.get("confidence", "medium")
+            })
+
+    for dep in shared_dependencies:
+        desc = (dep.get("description") or "").lower()
+
+        external_dependencies.append({
+            "description": dep.get("description"),
+            "risk": "External dependency",
+            "confidence": dep.get("confidence", "medium")
+        })
+
+    ld_risk = {
+        "high_risk_tasks": high_risk_tasks[:50],
+        "external_dependencies": external_dependencies[:50],
+        "summary": {
+            "high_risk_count": len(high_risk_tasks),
+            "external_dependency_count": len(external_dependencies)
+        }
+    }
+    # FORCE CLEAN CONTRACT SPLIT OUTPUT
+    contract_split = {
+        "base_build": base_build_items[:50],
+        "fitout": fitout_items[:50],
+        "shared": shared_dependencies[:50]
+    }
+    analysis = {
+        "mode": "local_fallback_v1",
+        "job_summary": {
+            "job_name": job.get("job_name"),
+            "job_number": job.get("job_number"),
+            "files_reviewed": len(files),
+            "readable_files": readable_files,
+            "content_length": len(extracted_text)
+        },
+        "quote_analysis": {
+            "detected_packages": detected_packages,
+            "structure": "local_fallback_inference",
+            "exclusions_detected": len(exclusions)
+        },
+        "scope_items": scope_items[:100],
+        "exclusions": exclusions[:100],
+        "proposed_tasks": proposed_tasks,
+        "proposed_task_codes": proposed_task_codes,
+        "proposed_programme": proposed_programme,
+        "materials": materials[:50],
+        "subcontractors": [],
+        "dependencies": dependencies[:100],
+        "risks": risks,
+        "ld_risk": ld_risk,
+        "contract_split": contract_split,
+        "extracted_text_preview": extracted_text[:4000]
+    }
 
     analysis_record = {
         "id": str(uuid.uuid4()),
@@ -2227,15 +2530,13 @@ DOCUMENT CONTENT:
             "$set": {
                 "latest_analysis": analysis,
                 "latest_analysis_id": analysis_record["id"],
-                "latest_analysis_status": "pending_review",
+                "latest_analysis_status": analysis_record["status"],
                 "latest_analysis_at": analysis_record["created_at"]
             }
         }
     )
 
     return {"analysis_id": analysis_record["id"], "analysis": analysis}
-
-
 @api_router.get("/jobs/{job_id}/programme")
 async def get_job_programme(job_id: str, user: dict = Depends(get_current_user)):
     programme = await db.job_programme.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
@@ -3740,6 +4041,251 @@ async def seed_master_task_codes(user: dict = Depends(require_roles(UserRole.ADM
 
 
 # Include router
+
+# ==================== LABOUR IMPORT ====================
+
+class LabourImportRow(BaseModel):
+    job_number: str
+    task_code: Optional[str] = None
+    date: str
+    hours: float
+    trade: Optional[str] = None
+    source_id: Optional[str] = None
+
+class LabourImportRequest(BaseModel):
+    rows: List[LabourImportRow]
+
+
+@api_router.post("/labour/import")
+async def import_labour(data: LabourImportRequest):
+    inserted = 0
+
+    for row in data.rows:
+        job_number = (row.job_number or "").strip()
+        task_code_value = (row.task_code or "").strip()
+
+        if not job_number:
+            continue
+
+        job = await db.jobs.find_one({"job_number": job_number}, {"_id": 0})
+        if not job:
+            continue
+
+        job_id = job["id"]
+
+        labour_doc = {
+            "id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "task_id": None,
+            "task_code": task_code_value or None,
+            "date": row.date,
+            "hours": row.hours,
+            "trade": row.trade,
+            "source": "timesheet_manager",
+            "source_id": row.source_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        await db.actual_labour.insert_one(labour_doc)
+        inserted += 1
+
+    return {"inserted": inserted}
+@api_router.post("/jobs/{job_id}/auto-allocate-labour")
+async def auto_allocate_labour(job_id: str):
+    rows = await db.actual_labour.find(
+        {"job_id": job_id, "task_id": None},
+        {"_id": 0}
+    ).to_list(1000)
+
+    matched = 0
+    unmatched = 0
+
+    for row in rows:
+        task_code_value = (row.get("task_code") or "").strip()
+        if not task_code_value:
+            unmatched += 1
+            continue
+
+        job_code = await db.job_task_codes.find_one(
+            {"job_id": job_id, "code": task_code_value},
+            {"_id": 0}
+        )
+
+        if not job_code:
+            continue
+
+        matching_tasks = await db.tasks.find(
+            {"job_id": job_id, "linked_task_codes": job_code["id"]},
+            {"_id": 0}
+        ).to_list(10)
+
+        if len(matching_tasks) != 1:
+            unmatched += 1
+            continue
+
+        task = matching_tasks[0]
+        task_id = task["id"]
+
+        await db.actual_labour.update_one(
+            {"id": row["id"]},
+            {"$set": {"task_id": task_id}}
+        )
+
+        current = task.get("actual_hours") or 0
+        new_total = float(current) + float(row.get("hours") or 0)
+
+        await db.tasks.update_one(
+            {"id": task_id},
+            {"$set": {"actual_hours": round(new_total, 2)}}
+        )
+
+        matched += 1
+
+    remaining_unmatched = await db.actual_labour.count_documents(
+        {"job_id": job_id, "task_id": None}
+    )
+
+    return {
+        "matched": matched,
+        "remaining_unmatched": remaining_unmatched
+    }
+
+# ===============================
+@api_router.post("/jobs/{job_id}/build-task-structure")
+async def build_task_structure(
+    job_id: str,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    try:
+        job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        scope_rows = await db.scope_items.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
+
+        levels = ["L4", "L5", "L6"]
+        areas = ["Core", "Perimeter", "Main Area", "Features"]
+
+        trade_map = [
+            {"code": "103", "name": "Partitions"},
+            {"code": "105", "name": "Linings"},
+            {"code": "106", "name": "Stopping"},
+            {"code": "107", "name": "Insulation"},
+            {"code": "102", "name": "Ceilings"},
+            {"code": "104", "name": "Aluminium / Glazing"},
+            {"code": "108", "name": "Feature Works"},
+            {"code": "109", "name": "Perforated Systems"},
+            {"code": "114", "name": "Acoustic Systems"},
+        ]
+
+        total_scope_hours = 0.0
+        for row in scope_rows:
+            try:
+                if row.get("approved_hours") not in [None, ""]:
+                    total_scope_hours += float(row.get("approved_hours"))
+                elif row.get("quoted_hours") not in [None, ""]:
+                    total_scope_hours += float(row.get("quoted_hours"))
+            except Exception:
+                pass
+
+        selected_trades = trade_map
+        task_count = len(levels) * len(areas) * len(selected_trades)
+        default_task_hours = round(total_scope_hours / task_count, 2) if total_scope_hours > 0 else 8.0
+
+        await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
+
+        tasks = []
+        sort_index = 1
+
+        for level in levels:
+            for area in areas:
+                previous_task_id = None
+
+                for trade in selected_trades:
+                    task_id = str(uuid.uuid4())
+                    task_name = f"{level} - {area} - {trade['name']}"
+
+                    task = {
+                        "id": task_id,
+                        "job_id": job_id,
+                        "task_name": task_name,
+                        "task_type": "quote_structure",
+                        "linked_task_codes": [],
+                        "planned_start": None,
+                        "planned_finish": None,
+                        "actual_start": None,
+                        "actual_finish": None,
+                        "duration_days": 1,
+                        "predecessor_ids": [previous_task_id] if previous_task_id else [],
+                        "owner_party": None,
+                        "is_internal": True,
+                        "subcontractor_id": None,
+                        "zone_area": f"{level} - {area}",
+                        "status": "planned",
+                        "blockers": None,
+                        "notes": "Generated from quote structure builder",
+                        "quoted_hours": default_task_hours,
+                        "actual_hours": 0,
+                        "percent_complete": 0,
+                        "locked": False,
+                        "crew_size": None,
+                        "hours_per_day": 8.0,
+                        "overtime_allowed": False,
+                        "saturday_allowed": bool(job.get("allow_saturday", False)),
+                        "trade_resource": trade["name"],
+                        "prerequisite_owner": None,
+                        "prerequisite_status": "pending",
+                        "prerequisite_note": None,
+                        "risk_flag": False,
+                        "pre_start_checklist": DEFAULT_PRESTART_CHECKLIST,
+                        "structure_level": level,
+                        "structure_area": area,
+                        "structure_code": trade["code"],
+                        "sort_index": sort_index,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "created_by": user["id"]
+                    }
+
+                    tasks.append(task)
+                    previous_task_id = task_id
+                    sort_index += 1
+
+        if tasks:
+            await db.tasks.insert_many(tasks)
+
+        return {
+            "status": "success",
+            "tasks_created": len(tasks),
+            "levels": levels,
+            "areas": areas,
+            "default_task_hours": default_task_hours
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }
+
+@api_router.get("/jobs/{job_id}/unmatched-labour")
+async def get_unmatched_labour(job_id: str):
+    rows = await db.actual_labour.find(
+        {
+            "job_id": job_id,
+            "task_id": None
+        },
+        {"_id": 0}
+    ).to_list(1000)
+
+    return {
+        "job_id": job_id,
+        "count": len(rows),
+        "rows": rows
+    }
+
 app.include_router(api_router)
 
 # CORS
@@ -3833,3 +4379,37 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
