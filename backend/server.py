@@ -1990,32 +1990,92 @@ async def upload_job_files(
     job_upload_dir = UPLOAD_DIR / job_id
     job_upload_dir.mkdir(exist_ok=True)
 
+    allowed_extensions = {
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".docx",
+        ".txt",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp"
+    }
+
     uploaded_files = []
+
     for file in files:
+        original_filename = file.filename or "upload.bin"
+        file_ext = Path(original_filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_ext or 'unknown'}"
+            )
+
         file_id = str(uuid.uuid4())
-        file_ext = Path(file.filename).suffix
-        file_path = job_upload_dir / f"{file_id}{file_ext}"
+        stored_filename = f"{file_id}__{Path(original_filename).name}"
+        file_path = job_upload_dir / stored_filename
 
         content = await file.read()
         with open(file_path, "wb") as f:
             f.write(content)
 
+        parse_status = "uploaded"
+        ocr_status = "not_required"
+        reference_only = False
+        warnings = []
+
+        if file_ext in {".jpg", ".jpeg", ".png", ".webp"}:
+            parse_status = "partial"
+            ocr_status = "pending"
+            warnings.append("Image uploaded. OCR pending.")
+        elif file_ext in {".docx"}:
+            parse_status = "uploaded"
+            warnings.append("DOCX uploaded. Parsing support to be expanded.")
+        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt"}:
+            reference_only = True
+            parse_status = "reference_only"
+            warnings.append("Stored as reference only.")
+
         file_record = {
             "id": file_id,
             "job_id": job_id,
-            "filename": file.filename,
+            "filename": original_filename,
+            "original_filename": original_filename,
+            "stored_filename": stored_filename,
             "filepath": str(file_path),
+            "stored_path": str(file_path),
+            "extension": file_ext,
             "content_type": file.content_type,
             "size": len(content),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "uploaded_by": user["id"]
+            "uploaded_by": user["id"],
+            "parse_status": parse_status,
+            "ocr_status": ocr_status,
+            "reference_only": reference_only,
+            "warnings": warnings,
+            "detected_document_type": None,
+            "needs_review": True
         }
+
         await db.job_files.insert_one(file_record)
-        uploaded_files.append({"id": file_id, "filename": file.filename})
 
-    return {"message": f"Uploaded {len(uploaded_files)} files", "files": uploaded_files}
+        uploaded_files.append({
+            "id": file_id,
+            "filename": original_filename,
+            "parse_status": parse_status,
+            "ocr_status": ocr_status,
+            "reference_only": reference_only,
+            "warnings": warnings
+        })
 
-
+    return {
+        "message": f"Uploaded {len(uploaded_files)} files",
+        "files": uploaded_files
+    }
 @api_router.delete("/jobs/{job_id}/files/{file_id}")
 async def delete_job_file(
     job_id: str,
@@ -2040,7 +2100,2426 @@ async def delete_job_file(
 
 @api_router.get("/jobs/{job_id}/files")
 async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
+    files = await db.job_files.find(
+        {"job_id": job_id},
+        {"_id": 0}
+    ).sort("uploaded_at", -1).to_list(200)
+    return files
+
+
+@api_router.post("/jobs/{job_id}/parse-programme")
+async def parse_job_programme_file(
+    job_id: str,
+    file_id: Optional[str] = None,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    """
+    Parse an uploaded programme file (Excel/CSV) and return structured items for review.
+    If file_id is provided, parse that specific file. Otherwise, parse the most recent
+    programme file for this job.
+    
+    Returns parsed items with warnings for edge cases like:
+    - Missing columns, mixed date formats, blank rows
+    - Duplicate rows, merged cells, missing predecessors/durations
+    """
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Find files for this job
     files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
+    if not files:
+        raise HTTPException(status_code=404, detail="No files uploaded for this job")
+    
+    # Filter to programme-parsable files
+    programme_extensions = ['.xlsx', '.xls', '.csv']
+    programme_files = [
+        f for f in files 
+        if any(f.get("filename", "").lower().endswith(ext) for ext in programme_extensions)
+    ]
+    
+    if not programme_files:
+        raise HTTPException(
+            status_code=400, 
+            detail="No Excel or CSV files found. Please upload a programme file (.xlsx, .xls, or .csv)"
+        )
+    
+    # Select file to parse
+    target_file = None
+    if file_id:
+        target_file = next((f for f in programme_files if f["id"] == file_id), None)
+        if not target_file:
+            raise HTTPException(status_code=404, detail="Specified file not found")
+    else:
+        # Use most recent programme file
+        target_file = programme_files[-1]
+    
+    filepath = target_file.get("filepath")
+    filename = target_file.get("filename", "unknown")
+    
+    if not filepath or not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found on server")
+    
+    # Parse the file
+    try:
+        parse_result = parse_uploaded_file(filepath, filename)
+    except Exception as e:
+        logger.error(f"Failed to parse programme file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
+    
+    # Store parsed items for later confirmation
+    parsed_record = {
+        "id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "file_id": target_file["id"],
+        "filename": filename,
+        "items": parse_result.get("parse_result", {}).get("items", []),
+        "warnings": parse_result.get("parse_result", {}).get("warnings", []),
+        "errors": parse_result.get("parse_result", {}).get("errors", []),
+        "metadata": parse_result.get("parse_result", {}).get("metadata", {}),
+        "status": "pending_review",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+    
+    # Delete any previous parsed records for this job
+    await db.job_programme_parsed.delete_many({"job_id": job_id})
+    
+    # Store new parsed record
+    await db.job_programme_parsed.insert_one(parsed_record)
+    
+    return {
+        "parse_id": parsed_record["id"],
+        "filename": filename,
+        "success": parse_result.get("success", False),
+        "item_count": parse_result.get("item_count", 0),
+        "warning_count": parse_result.get("warning_count", 0),
+        "error_count": parse_result.get("error_count", 0),
+        "items": parse_result.get("parse_result", {}).get("items", []),
+        "warnings": parse_result.get("parse_result", {}).get("warnings", []),
+        "errors": parse_result.get("parse_result", {}).get("errors", []),
+        "metadata": parse_result.get("parse_result", {}).get("metadata", {})
+    }
+
+
+@api_router.get("/jobs/{job_id}/parsed-programme")
+async def get_parsed_programme(job_id: str, user: dict = Depends(get_current_user)):
+    """Get the most recent parsed programme for a job (before confirmation)."""
+    parsed = await db.job_programme_parsed.find_one(
+        {"job_id": job_id}, 
+        {"_id": 0},
+        sort=[("created_at", -1)]
+    )
+    if not parsed:
+        raise HTTPException(status_code=404, detail="No parsed programme found for this job")
+    return parsed
+
+
+@api_router.post("/jobs/{job_id}/analyze")
+async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    files = await db.job_files.find(
+        {"job_id": job_id},
+        {"_id": 0}
+    ).sort("uploaded_at", -1).to_list(200)
+
+    extracted_text = ""
+    readable_files = []
+
+    for f in files:
+        try:
+            if f.get("reference_only"):
+                continue
+
+            filepath = (f.get("filepath") or "").lower()
+            original_path = f.get("filepath")
+
+            if not original_path or not os.path.exists(original_path):
+                continue
+
+            if filepath.endswith(".xls"):
+                wb = xlrd.open_workbook(original_path)
+                for sheet in wb.sheets():
+                    for row_idx in range(min(sheet.nrows, 200)):
+                        row_values = sheet.row_values(row_idx)
+                        extracted_text += " | ".join([str(v) for v in row_values if str(v).strip()]) + "\n"
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".pdf"):
+                import fitz
+                doc = fitz.open(original_path)
+                for page in doc:
+                    extracted_text += page.get_text()
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".xlsx"):
+                from openpyxl import load_workbook
+                wb = load_workbook(original_path, data_only=True)
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        extracted_text += " | ".join([str(v) for v in row if v is not None and str(v).strip()]) + "\n"
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".csv") or filepath.endswith(".txt"):
+                with open(original_path, "r", encoding="utf-8", errors="ignore") as fh:
+                    extracted_text += fh.read()[:20000] + "\n"
+                readable_files.append(f.get("filename"))
+
+            elif filepath.endswith(".docx"):
+                try:
+                    from docx import Document
+                    doc = Document(original_path)
+                    for para in doc.paragraphs:
+                        text = (para.text or "").strip()
+                        if text:
+                            extracted_text += text + "\n"
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = " | ".join([(cell.text or "").strip() for cell in row.cells if (cell.text or "").strip()])
+                            if row_text:
+                                extracted_text += row_text + "\n"
+                    readable_files.append(f.get("filename"))
+                except Exception:
+                    continue
+
+            elif filepath.endswith(".jpg") or filepath.endswith(".jpeg") or filepath.endswith(".png") or filepath.endswith(".webp"):
+                continue
+
+            else:
+                with open(original_path, "rb") as fh:
+                    content = fh.read().decode(errors="ignore")
+                    extracted_text += content[:10000]
+                readable_files.append(f.get("filename"))
+
+        except Exception:
+            continue
+
+    extracted_text = (extracted_text or "").strip()
+    if not extracted_text:
+        extracted_text = "No readable document content."
+
+    text_lower = extracted_text.lower()
+    raw_lines = [line.strip() for line in extracted_text.splitlines()]
+    lines_clean = [line for line in raw_lines if line and len(line) > 3]
+
+    package_keywords = {
+        "partitions": ["partition", "partitions", "steel stud", "stud partition", "framing"],
+        "linings": ["lining", "linings", "gib", "plasterboard", "wall linings"],
+        "stopping": ["stopping", "stopped", "skim coat", "skim", "stopt"],
+        "ceilings": ["ceiling", "ceilings", "grid", "tile", "pelmet", "ceiling tile"],
+        "joinery": ["joinery", "aluminium", "cabinet", "casework"],
+        "finishings": ["painting", "paint", "wall finish", "floor finish", "vinyl", "carpet", "tile finish"]
+    }
+
+    detected_packages = []
+    for package_name, keywords in package_keywords.items():
+        if any(k in text_lower for k in keywords):
+            detected_packages.append(package_name)
+
+    exclusions = []
+    seen_exclusions = set()
+    for line in lines_clean:
+        line_lower = line.lower()
+        if (
+            "exclude" in line_lower
+            or "excluded" in line_lower
+            or "by others" in line_lower
+            or "not included" in line_lower
+            or "not allowed" in line_lower
+        ):
+            key = line_lower
+            if key not in seen_exclusions:
+                exclusions.append({
+                    "description": line,
+                    "category": "exclusion"
+                })
+                seen_exclusions.add(key)
+
+    inclusions = []
+    seen_inclusions = set()
+    for line in lines_clean:
+        line_lower = line.lower()
+        if (
+            "include" in line_lower
+            or "included" in line_lower
+            or "we have included" in line_lower
+            or "we have allowed" in line_lower
+            or "pricing is based" in line_lower
+        ):
+            key = line_lower
+            if key not in seen_inclusions:
+                inclusions.append({
+                    "description": line,
+                    "category": "inclusion"
+                })
+                seen_inclusions.add(key)
+
+    ld_risk = {
+        "has_lds": any(term in text_lower for term in ["liquidated damages", "lds", "liquidated damage"]),
+        "mentions_dates": any(term in text_lower for term in ["practical completion", "completion date", "finish date", "handover"]),
+        "risk_level": "high" if "liquidated damages" in text_lower else "medium" if "completion date" in text_lower else "low"
+    }
+
+    contract_split = {
+        "has_base_build": any(term in text_lower for term in ["base build", "basebuild"]),
+        "has_fitout": "fitout" in text_lower or "fit out" in text_lower,
+        "primary_contract": "fitout" if ("fitout" in text_lower or "fit out" in text_lower) else "base_build",
+        "shared_packages": [],
+        "structure": "local_fallback_inference"
+    }
+
+    analysis = {
+        "job_id": job_id,
+        "summary": {
+            "files_reviewed": len(files),
+            "readable_files": readable_files,
+            "content_length": len(extracted_text)
+        },
+        "quote_analysis": {
+            "detected_packages": detected_packages,
+            "structure": "local_fallback_inference",
+            "exclusions_detected": len(exclusions),
+            "inclusions_detected": len(inclusions)
+        },
+        "ld_risk": ld_risk,
+        "contract_split": contract_split,
+        "exclusions": exclusions[:50],
+        "inclusions": inclusions[:50],
+        "extracted_text_preview": extracted_text[:4000]
+    }
+
+    analysis_record = {
+        "id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "analysis": analysis,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+
+    await db.job_analyses.insert_one(analysis_record)
+
+    await db.jobs.update_one(
+        {"id": job_id},
+        {
+            "$set": {
+                "latest_analysis": analysis,
+                "last_analysis_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+
+    return {"analysis_id": analysis_record["id"], "analysis": analysis}
+
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import re
+import math
+import logging
+from pathlib import Path
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional, Dict, Any
+import uuid
+from datetime import datetime, timezone, timedelta
+import bcrypt
+import jwt
+import json
+import xlrd
+try:
+    EMERGENT_AVAILABLE = True
+except ImportError:
+    LlmChat = None
+    UserMessage = None
+    EMERGENT_AVAILABLE = False
+from programme_parser import parse_uploaded_file
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+# MongoDB connection
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'fitout-os-secret-key-change-in-production')
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+# Security
+security = HTTPBearer()
+
+# Create the main app
+app = FastAPI(title="FitoutOS API", version="1.0.0")
+
+# Create a router with the /api prefix
+api_router = APIRouter(prefix="/api")
+
+# Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Upload directory
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+NZ_REGION = os.environ.get("NZ_REGION", "auckland").strip().lower()
+
+LABOUR_MATCH_GROUPS = [
+    {"framing", "frame", "stud", "studs", "purlin", "purlins"},
+    {"lining", "linings", "gib", "plasterboard", "board", "boards"},
+    {"stopping", "stop", "skim", "skimcoat", "skimcoating"},
+    {"ceiling", "ceilings", "furring", "grid", "tile", "tiles"},
+    {"insulation", "insulate", "insulated", "batts", "batt"},
+    {"aluminium", "aluminum", "glazing", "glazed", "glass"},
+]
+
+LABOUR_MATCH_STOPWORDS = {
+    "labour", "labor", "works", "work", "scope", "package", "install", "installation",
+    "supply", "fix", "fixing", "fit", "fitout", "commercial", "stage", "area", "areas",
+    "zone", "zones", "internal", "external", "interior", "exterior", "project",
+    "level", "levels", "toilet", "toilets", "wall", "walls", "ceiling", "ceilings"
+}
+
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def tokenize_text(text: str) -> set:
+    return {
+        token
+        for token in normalize_text(text).split()
+        if len(token) >= 3 and token not in LABOUR_MATCH_STOPWORDS
+    }
+
+
+def get_scope_hours_value(scope_row: Dict[str, Any]) -> Optional[float]:
+    try:
+        approved = scope_row.get("approved_hours")
+        if approved not in [None, ""]:
+            return float(approved)
+        quoted = scope_row.get("quoted_hours")
+        if quoted not in [None, ""]:
+            return float(quoted)
+    except Exception:
+        return None
+    return None
+
+
+def detect_task_family(text: str) -> str:
+    t = normalize_text(text)
+
+    if any(word in t for word in ["insulation", "insulate", "greenstuf", "autex", "batt", "batts"]):
+        return "insulation"
+    if any(word in t for word in ["stopping", "stop", "skim", "finish", "finishing"]):
+        return "stopping"
+    if any(word in t for word in ["lining", "linings", "gib", "plasterboard", "aqualine", "fyreline", "fyrelines"]):
+        return "linings"
+    if any(word in t for word in ["ceiling", "ceilings", "furring", "grid", "tile", "tiles"]):
+        return "ceilings"
+    if any(word in t for word in ["framing", "frame", "stud", "studs", "purlin", "purlins", "partition", "partitions"]):
+        return "framing"
+    if any(word in t for word in ["aluminium", "aluminum", "glazing", "glass"]):
+        return "aluminium"
+
+    return "other"
+
+
+def detect_task_code_family(code_value: str) -> str:
+    code_value = (code_value or "").strip().upper()
+
+    if code_value.startswith("TS-"):
+        return "framing"
+    if code_value.startswith("WL-"):
+        return "linings"
+    if code_value.startswith("ST-"):
+        return "stopping"
+    if code_value.startswith("CL-"):
+        return "ceilings"
+    if code_value.startswith("IN-"):
+        return "insulation"
+
+    return "other"
+
+
+def task_matches_scope(scope_item_name: str, task_name: str) -> bool:
+    scope_norm = normalize_text(scope_item_name)
+    task_norm = normalize_text(task_name)
+
+    if not scope_norm or not task_norm:
+        return False
+
+    if scope_norm in task_norm or task_norm in scope_norm:
+        return True
+
+    scope_tokens = tokenize_text(scope_norm)
+    task_tokens = tokenize_text(task_norm)
+
+    if not scope_tokens or not task_tokens:
+        return False
+
+    if scope_tokens.intersection(task_tokens):
+        return True
+
+    for keyword_group in LABOUR_MATCH_GROUPS:
+        if scope_tokens.intersection(keyword_group) and task_tokens.intersection(keyword_group):
+            return True
+
+    return False
+
+
+def build_scope_task_allocation(scope_rows: List[Dict[str, Any]], task_rows: List[Dict[str, Any]]) -> Dict[str, float]:
+    allocation_map: Dict[str, float] = {}
+
+    eligible_tasks = [
+        task_row for task_row in task_rows
+        if task_row.get("is_internal", True)
+        and task_row.get("planned_start")
+        and task_row.get("planned_finish")
+    ]
+
+    for scope_row in scope_rows:
+        hours = get_scope_hours_value(scope_row)
+        if hours is None or hours <= 0:
+            continue
+
+        scope_item_name = scope_row.get("item")
+        if not scope_item_name:
+            continue
+
+        matching_tasks = [
+            task_row for task_row in eligible_tasks
+            if task_matches_scope(scope_item_name, task_row.get("task_name", ""))
+        ]
+
+        if not matching_tasks:
+            continue
+
+        split_hours = hours / len(matching_tasks)
+
+        for task_row in matching_tasks:
+            task_id = task_row.get("id")
+            if not task_id:
+                continue
+            allocation_map[task_id] = allocation_map.get(task_id, 0.0) + split_hours
+
+    return allocation_map
+
+
+def get_nz_public_holidays(year: int, region: str = NZ_REGION):
+    region = (region or "auckland").strip().lower()
+
+    holidays = set()
+
+    def d(value: str):
+        return datetime.fromisoformat(value).date()
+
+    def nth_weekday(year_value: int, month: int, weekday: int, n: int):
+        first = datetime(year_value, month, 1).date()
+        offset = (weekday - first.weekday()) % 7
+        return first + timedelta(days=offset + (n - 1) * 7)
+
+    def last_weekday(year_value: int, month: int, weekday: int):
+        if month == 12:
+            next_month = datetime(year_value + 1, 1, 1).date()
+        else:
+            next_month = datetime(year_value, month + 1, 1).date()
+        last = next_month - timedelta(days=1)
+        offset = (last.weekday() - weekday) % 7
+        return last - timedelta(days=offset)
+
+    def easter_sunday(year_value: int):
+        a = year_value % 19
+        b = year_value // 100
+        c = year_value % 100
+        d1 = b // 4
+        e = b % 4
+        f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d1 - g + 15) % 30
+        i = c // 4
+        k = c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * l) // 451
+        month = (h + l - 7 * m + 114) // 31
+        day = ((h + l - 7 * m + 114) % 31) + 1
+        return datetime(year_value, month, day).date()
+
+    def observed(fixed_date):
+        if fixed_date.weekday() == 5:
+            return fixed_date + timedelta(days=2)
+        if fixed_date.weekday() == 6:
+            return fixed_date + timedelta(days=1)
+        return fixed_date
+
+    holidays.add(observed(datetime(year, 1, 1).date()))
+    holidays.add(observed(datetime(year, 1, 2).date()))
+
+    if region == "auckland":
+        holidays.add(last_weekday(year, 1, 0))
+
+    holidays.add(observed(datetime(year, 2, 6).date()))
+
+    easter = easter_sunday(year)
+    holidays.add(easter - timedelta(days=2))
+    holidays.add(easter + timedelta(days=1))
+
+    holidays.add(observed(datetime(year, 4, 25).date()))
+    holidays.add(nth_weekday(year, 6, 0, 1))
+
+    matariki_by_year = {
+        2025: d("2025-06-20"),
+        2026: d("2026-07-10"),
+        2027: d("2027-06-25"),
+        2028: d("2028-07-14"),
+        2029: d("2029-07-06"),
+        2030: d("2030-06-21")
+    }
+    if year in matariki_by_year:
+        holidays.add(matariki_by_year[year])
+
+    holidays.add(nth_weekday(year, 10, 0, 4))
+    holidays.add(observed(datetime(year, 12, 25).date()))
+    holidays.add(observed(datetime(year, 12, 26).date()))
+
+    return holidays
+
+
+def get_work_hours_for_day(day_value, allow_saturday: bool = False, region: str = NZ_REGION):
+    if isinstance(day_value, datetime):
+        day_value = day_value.date()
+
+    if day_value in get_nz_public_holidays(day_value.year, region):
+        return 0
+
+    weekday = day_value.weekday()
+    if weekday in (0, 1, 2, 3):
+        return 9
+    if weekday == 4:
+        return 8
+    if weekday == 5:
+        return 8 if allow_saturday else 0
+    return 0
+
+
+def calculate_work_window_hours(start_date, finish_date, allow_saturday: bool = False, region: str = NZ_REGION):
+    if not start_date or not finish_date:
+        return {"days": 0, "hours": 0, "holiday_days": 0}
+
+    if isinstance(start_date, datetime):
+        start_date = start_date.date()
+    if isinstance(finish_date, datetime):
+        finish_date = finish_date.date()
+
+    current = start_date
+    work_days = 0
+    work_hours = 0
+    holiday_days = 0
+
+    while current <= finish_date:
+        hours = get_work_hours_for_day(current, allow_saturday=allow_saturday, region=region)
+        if current in get_nz_public_holidays(current.year, region):
+            holiday_days += 1
+        if hours > 0:
+            work_days += 1
+            work_hours += hours
+        current += timedelta(days=1)
+
+    return {"days": work_days, "hours": work_hours, "holiday_days": holiday_days}
+
+
+def calculate_required_crew(quoted_hours, available_hours):
+    try:
+        qh = float(quoted_hours or 0)
+        ah = float(available_hours or 0)
+        if qh <= 0 or ah <= 0:
+            return None
+        return round(qh / ah, 2)
+    except Exception:
+        return None
+
+
+# ============== PYDANTIC MODELS ==============
+
+class UserRole:
+    ADMIN = "admin"
+    PM = "pm"
+    WORKER = "worker"
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str = UserRole.WORKER
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    role: str = UserRole.WORKER
+    created_at: str = ""
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class JobCreate(BaseModel):
+    max_crew: Optional[float] = None
+    standard_crew: Optional[float] = None
+    allow_saturday: Optional[bool] = False
+    allow_overtime: Optional[bool] = False
+    job_number: str
+    job_name: str
+    main_contractor: Optional[str] = None
+    site_address: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    status: str = "active"
+
+
+class JobResponse(BaseModel):
+    max_crew: Optional[float] = None
+    standard_crew: Optional[float] = None
+    allow_saturday: Optional[bool] = False
+    allow_overtime: Optional[bool] = False
+    id: str
+    job_number: str
+    job_name: str
+    main_contractor: Optional[str] = None
+    site_address: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    status: str
+    created_at: str = ""
+    created_by: str
+    latest_analysis: Optional[Dict[str, Any]] = None
+    latest_analysis_id: Optional[str] = None
+    latest_analysis_status: Optional[str] = None
+    latest_analysis_at: Optional[str] = None
+
+
+class MasterTaskCodeCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_global_fallback: bool = False
+
+
+class MasterTaskCodeResponse(BaseModel):
+    id: str
+    code: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_global_fallback: bool
+    is_active: bool
+
+
+class JobTaskCodeCreate(BaseModel):
+    master_code_id: str
+    custom_label: Optional[str] = None
+    is_active: bool = True
+
+
+class JobTaskCodeResponse(BaseModel):
+    id: str
+    job_id: str
+    master_code_id: str
+    code: str
+    name: str
+    custom_label: Optional[str] = None
+    is_active: bool
+
+
+# Prerequisite owner options
+PREREQUISITE_OWNERS = ["YOU", "Main contractor", "Painter", "Electrician", "Plumber", "HVAC", "Joiner", "Other"]
+
+# Default pre-start checklist items
+DEFAULT_PRESTART_CHECKLIST = [
+    {"key": "area_handed_over", "label": "Area handed over", "checked": False},
+    {"key": "previous_trade_complete", "label": "Previous trade complete", "checked": False},
+    {"key": "services_complete", "label": "Services complete", "checked": False},
+    {"key": "inspection_passed", "label": "Inspection passed", "checked": False},
+    {"key": "materials_ready", "label": "Materials ready", "checked": False},
+    {"key": "access_ready", "label": "Access ready", "checked": False},
+    {"key": "programme_confirmed", "label": "Programme confirmed", "checked": False},
+    {"key": "mc_confirmed_ready", "label": "MC confirmed ready", "checked": False},
+]
+
+
+class TaskCreate(BaseModel):
+    job_id: str
+    task_name: str
+    task_type: Optional[str] = None
+    linked_task_codes: List[str] = []
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_finish: Optional[str] = None
+    duration_days: Optional[int] = None
+    predecessor_ids: List[str] = []
+    owner_party: Optional[str] = None
+    is_internal: bool = True
+    subcontractor_id: Optional[str] = None
+    zone_area: Optional[str] = None
+    status: str = "planned"
+    blockers: Optional[str] = None
+    notes: Optional[str] = None
+    quoted_hours: Optional[float] = None
+    percent_complete: int = 0
+    locked: bool = False
+    # New fields for crew/resource
+    crew_size: Optional[float] = None
+    hours_per_day: Optional[float] = 8.0
+    overtime_allowed: bool = False
+    saturday_allowed: bool = False
+    trade_resource: Optional[str] = None
+    # Prerequisite tracking
+    prerequisite_owner: Optional[str] = None  # Who is responsible for prerequisite
+    prerequisite_status: str = "pending"  # pending, ready, waiting, blocked, complete
+    prerequisite_note: Optional[str] = None
+    risk_flag: bool = False
+    # Pre-start checklist
+    pre_start_checklist: Optional[List[Dict[str, Any]]] = None
+
+
+class TaskResponse(BaseModel):
+    id: str
+    job_id: str
+    task_name: str
+    task_type: Optional[str] = None
+    linked_task_codes: List[str]
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_finish: Optional[str] = None
+    duration_days: Optional[int] = None
+    predecessor_ids: List[str]
+    owner_party: Optional[str] = None
+    is_internal: bool
+    subcontractor_id: Optional[str] = None
+    zone_area: Optional[str] = None
+    status: str
+    blockers: Optional[str] = None
+    notes: Optional[str] = None
+    quoted_hours: Optional[float] = None
+    actual_hours: float = 0
+    percent_complete: int = 0
+    locked: bool = False
+    is_critical: bool = False
+    total_float: Optional[int] = None
+    created_at: str = ""
+    # New fields
+    crew_size: Optional[float] = None
+    hours_per_day: Optional[float] = 8.0
+    overtime_allowed: bool = False
+    saturday_allowed: bool = False
+    trade_resource: Optional[str] = None
+    prerequisite_owner: Optional[str] = None
+    prerequisite_status: str = "pending"
+    prerequisite_note: Optional[str] = None
+    risk_flag: bool = False
+    pre_start_checklist: Optional[List[Dict[str, Any]]] = None
+    # Computed warning flags
+    is_blocked: bool = False
+    has_incomplete_checklist: bool = False
+    delay_risk: bool = False
+
+
+class ScopeItemApprovalUpdate(BaseModel):
+    approved_hours: Optional[float] = None
+    approval_status: str = "approved"
+
+
+class ScopeItemResponse(BaseModel):
+    id: str
+    job_id: str
+    item: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    quoted_hours: Optional[float] = None
+    approved_hours: Optional[float] = None
+    approval_status: str = "pending"
+    approved_at: Optional[str] = None
+    approved_by: Optional[str] = None
+    inclusions: Optional[List[str]] = None
+    exclusions: Optional[List[str]] = None
+    allowances: Optional[List[str]] = None
+    confidence: Optional[str] = None
+    task_id: Optional[str] = None
+    created_at: str = ""
+
+
+class TimesheetRowCreate(BaseModel):
+    date: str
+    job_id: Optional[str] = None
+    job_number: Optional[str] = None
+    task_id: Optional[str] = None
+    task_name: Optional[str] = None
+    task_code_id: Optional[str] = None
+    task_code: Optional[str] = None
+    description: Optional[str] = None
+    hours: float
+    fallback_reason: Optional[str] = None
+    entry_type: str = "Work"
+
+
+class TimesheetCreate(BaseModel):
+    rows: List[TimesheetRowCreate]
+
+
+class TimesheetRowResponse(BaseModel):
+    id: str
+    user_id: str
+    user_name: str
+    date: str
+    job_id: Optional[str] = None
+    job_number: Optional[str] = None
+    job_name: Optional[str] = None
+    task_id: Optional[str] = None
+    task_name: Optional[str] = None
+    task_code_id: Optional[str] = None
+    task_code: Optional[str] = None
+    task_code_name: Optional[str] = None
+    description: Optional[str] = None
+    hours: float
+    status: str
+    fallback_reason: Optional[str] = None
+    entry_type: str = "Work"
+    submitted_at: Optional[str] = None
+    approved_at: Optional[str] = None
+    approved_by: Optional[str] = None
+
+
+class SubcontractorCreate(BaseModel):
+    company_name: str
+    trade_type: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    is_preferred: bool = False
+    is_nominated: bool = False
+    notes: Optional[str] = None
+    typical_lead_time_days: Optional[int] = None
+    typical_crew_size: Optional[int] = None
+
+
+class SubcontractorResponse(BaseModel):
+    id: str
+    company_name: str
+    trade_type: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    is_preferred: bool
+    is_nominated: bool
+    notes: Optional[str] = None
+    typical_lead_time_days: Optional[int] = None
+    typical_crew_size: Optional[int] = None
+    is_active: bool
+
+
+class MaterialCreate(BaseModel):
+    task_id: str
+    name: str
+    package_name: Optional[str] = None
+    supplier: Optional[str] = None
+    is_required: bool = True
+    is_long_lead: bool = False
+    order_lead_time_days: Optional[int] = None
+    delivery_buffer_days: Optional[int] = None
+    status: str = "required"
+
+
+class MaterialResponse(BaseModel):
+    id: str
+    task_id: str
+    name: str
+    package_name: Optional[str] = None
+    supplier: Optional[str] = None
+    is_required: bool
+    is_long_lead: bool
+    order_lead_time_days: Optional[int] = None
+    delivery_buffer_days: Optional[int] = None
+    order_due_date: Optional[str] = None
+    delivery_due_date: Optional[str] = None
+    status: str
+
+
+class AISettingsUpdate(BaseModel):
+    openai_api_key: Optional[str] = None
+    use_default_key: bool = True
+
+
+class AISettingsResponse(BaseModel):
+    use_default_key: bool
+    has_custom_key: bool
+
+
+# Delay tracking models
+class DelayCreate(BaseModel):
+    task_id: str
+    delay_type: str  # internal, subcontractor, main_contractor, approvals, materials, weather, access, inspections
+    delay_days: int
+    description: Optional[str] = None
+    caused_by: Optional[str] = None
+    impact_description: Optional[str] = None
+
+
+class DelayResponse(BaseModel):
+    id: str
+    task_id: str
+    task_name: str
+    job_id: str
+    delay_type: str
+    delay_days: int
+    description: Optional[str] = None
+    caused_by: Optional[str] = None
+    impact_description: Optional[str] = None
+    affected_tasks: List[str] = []
+    created_at: str = ""
+    resolved: bool = False
+    resolved_at: Optional[str] = None
+
+
+# ============== AUTH HELPERS ==============
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def create_token(user_id: str, email: str, role: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def require_roles(*roles):
+    async def role_checker(user: dict = Depends(get_current_user)):
+        if user["role"] not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return role_checker
+
+
+# ============== AUTH ENDPOINTS ==============
+
+@api_router.post("/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    existing = await db.users.find_one({"email": user_data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user_id = str(uuid.uuid4())
+    user = {
+        "id": user_id,
+        "email": user_data.email,
+        "password": hash_password(user_data.password),
+        "name": user_data.name,
+        "role": user_data.role,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(user)
+
+    token = create_token(user_id, user_data.email, user_data.role)
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user_id,
+            email=user_data.email,
+            name=user_data.name,
+            role=user_data.role,
+            created_at=user["created_at"]
+        )
+    )
+
+
+@api_router.post("/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    email = credentials.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    stored_password = (user.get("password") or user.get("hashed_password") or user.get("password_hash")) if user else None
+    if not user or not stored_password or not verify_password(credentials.password, stored_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_token(user["id"], user["email"], user["role"])
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            role=user["role"],
+            created_at=user["created_at"]
+        )
+    )
+
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_me(user: dict = Depends(get_current_user)):
+    return UserResponse(**user)
+
+
+@api_router.get("/users", response_model=List[UserResponse])
+async def get_users(user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    return [UserResponse(**u) for u in users]
+
+
+# ============== JOBS ENDPOINTS ==============
+
+@api_router.post("/jobs", response_model=JobResponse)
+async def create_job(job_data: JobCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.jobs.find_one({"job_number": job_data.job_number})
+    if existing:
+        raise HTTPException(status_code=400, detail="Job number already exists")
+
+    job_id = str(uuid.uuid4())
+    job = {
+        "id": job_id,
+        **job_data.model_dump(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+    await db.jobs.insert_one(job)
+
+    # Auto-assign standard task codes to the new job
+    standard_codes = await db.master_task_codes.find(
+        {"is_global_fallback": False, "is_active": True},
+        {"_id": 0}
+    ).to_list(100)
+
+    job_codes_to_insert = []
+    for master_code in standard_codes:
+        job_code = {
+            "id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "task_code": task_code_value or None,
+            "master_code_id": master_code["id"],
+            "code": master_code["code"],
+            "name": master_code["name"],
+            "custom_label": None,
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        job_codes_to_insert.append(job_code)
+
+    if job_codes_to_insert:
+        await db.job_task_codes.insert_many(job_codes_to_insert)
+        logger.info(f"Auto-assigned {len(job_codes_to_insert)} task codes to job {job_id}")
+
+    return JobResponse(**job)
+
+
+@api_router.get("/jobs", response_model=List[JobResponse])
+async def get_jobs(user: dict = Depends(get_current_user)):
+    jobs = await db.jobs.find({}, {"_id": 0}).to_list(1000)
+    return [JobResponse(**j) for j in jobs]
+
+
+@api_router.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str, user: dict = Depends(get_current_user)):
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobResponse(**job)
+
+
+@api_router.put("/jobs/{job_id}", response_model=JobResponse)
+async def update_job(job_id: str, job_data: JobCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.jobs.find_one({"id": job_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    update_data = job_data.model_dump()
+    await db.jobs.update_one({"id": job_id}, {"$set": update_data})
+
+    updated = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    return JobResponse(**updated)
+
+
+@api_router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    result = await db.jobs.delete_one({"id": job_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"message": "Job deleted"}
+
+
+# ============== MASTER TASK CODES ==============
+
+@api_router.post("/task-codes/master", response_model=MasterTaskCodeResponse)
+async def create_master_task_code(code_data: MasterTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    existing = await db.master_task_codes.find_one({"code": code_data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Task code already exists")
+
+    code_id = str(uuid.uuid4())
+    code = {
+        "id": code_id,
+        **code_data.model_dump(),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.master_task_codes.insert_one(code)
+    return MasterTaskCodeResponse(**code)
+
+
+@api_router.get("/task-codes/master", response_model=List[MasterTaskCodeResponse])
+async def get_master_task_codes(user: dict = Depends(get_current_user)):
+    codes = await db.master_task_codes.find({}, {"_id": 0}).to_list(1000)
+    return [MasterTaskCodeResponse(**c) for c in codes]
+
+
+@api_router.put("/task-codes/master/{code_id}", response_model=MasterTaskCodeResponse)
+async def update_master_task_code(code_id: str, code_data: MasterTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    existing = await db.master_task_codes.find_one({"id": code_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task code not found")
+
+    await db.master_task_codes.update_one({"id": code_id}, {"$set": code_data.model_dump()})
+    updated = await db.master_task_codes.find_one({"id": code_id}, {"_id": 0})
+    return MasterTaskCodeResponse(**updated)
+
+
+@api_router.get("/task-codes/fallback", response_model=List[MasterTaskCodeResponse])
+async def get_fallback_task_codes(user: dict = Depends(get_current_user)):
+    """Get global fallback task codes for non-job-specific entries"""
+    codes = await db.master_task_codes.find({"is_global_fallback": True, "is_active": True}, {"_id": 0}).to_list(100)
+    return [MasterTaskCodeResponse(**c) for c in codes]
+
+
+# ============== JOB TASK CODES ==============
+
+@api_router.post("/jobs/{job_id}/task-codes", response_model=JobTaskCodeResponse)
+async def add_job_task_code(job_id: str, code_data: JobTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    master_code = await db.master_task_codes.find_one({"id": code_data.master_code_id})
+    if not master_code:
+        raise HTTPException(status_code=404, detail="Master task code not found")
+
+    existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": code_data.master_code_id})
+    if existing:
+        raise HTTPException(status_code=400, detail="Task code already added to this job")
+
+    code_id = str(uuid.uuid4())
+    job_code = {
+        "id": code_id,
+        "job_id": job_id,
+        "master_code_id": code_data.master_code_id,
+        "code": master_code["code"],
+        "name": master_code["name"],
+        "custom_label": code_data.custom_label,
+        "is_active": code_data.is_active,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.job_task_codes.insert_one(job_code)
+    return JobTaskCodeResponse(**job_code)
+
+
+@api_router.get("/jobs/{job_id}/task-codes", response_model=List[JobTaskCodeResponse])
+async def get_job_task_codes(job_id: str, active_only: bool = False, user: dict = Depends(get_current_user)):
+    query = {"job_id": job_id}
+    if active_only:
+        query["is_active"] = True
+    codes = await db.job_task_codes.find(query, {"_id": 0}).to_list(1000)
+    return [JobTaskCodeResponse(**c) for c in codes]
+
+
+@api_router.put("/jobs/{job_id}/task-codes/{code_id}", response_model=JobTaskCodeResponse)
+async def update_job_task_code(job_id: str, code_id: str, code_data: JobTaskCodeCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.job_task_codes.find_one({"id": code_id, "job_id": job_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Job task code not found")
+
+    await db.job_task_codes.update_one(
+        {"id": code_id},
+        {"$set": {"custom_label": code_data.custom_label, "is_active": code_data.is_active}}
+    )
+    updated = await db.job_task_codes.find_one({"id": code_id}, {"_id": 0})
+    return JobTaskCodeResponse(**updated)
+
+
+# ============== TASKS ==============
+
+def compute_task_warnings(task: dict, all_tasks: List[dict] = None) -> dict:
+    """Compute warning flags for a task based on dependencies, checklist, and dates."""
+    warnings = {
+        "is_blocked": False,
+        "has_incomplete_checklist": False,
+        "delay_risk": False
+    }
+    
+    # Check if blocked by status
+    if task.get("status") in ["blocked", "delayed"]:
+        warnings["is_blocked"] = True
+    
+    # Check if checklist incomplete
+    checklist = task.get("pre_start_checklist") or []
+    if checklist:
+        if any(not item.get("checked", False) for item in checklist):
+            warnings["has_incomplete_checklist"] = True
+    
+    # Check for delay risk based on dates
+    planned_start = task.get("planned_start")
+    if planned_start:
+        try:
+            start_dt = datetime.fromisoformat(planned_start.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            days_until_start = (start_dt - now).days
+            
+            # Risk if start date is close (within 3 days) or passed and task not started
+            if days_until_start <= 3 and task.get("status") not in ["active", "complete"]:
+                warnings["delay_risk"] = True
+            if days_until_start < 0 and task.get("status") in ["planned", "blocked"]:
+                warnings["delay_risk"] = True
+        except Exception:
+            pass
+    
+    # Check predecessor status
+    if task.get("prerequisite_status") in ["blocked", "waiting"]:
+        warnings["is_blocked"] = True
+    
+    # Check predecessor tasks if all_tasks provided
+    if all_tasks and task.get("predecessor_ids"):
+        tasks_by_id = {t["id"]: t for t in all_tasks}
+        for pred_id in task["predecessor_ids"]:
+            pred_task = tasks_by_id.get(pred_id)
+            if pred_task and pred_task.get("status") != "complete":
+                warnings["is_blocked"] = True
+                break
+    
+    return warnings
+
+
+def enrich_task_response(task: dict, all_tasks: List[dict] = None) -> dict:
+    """Enrich task with computed fields."""
+    warnings = compute_task_warnings(task, all_tasks)
+    task.update(warnings)
+    
+    # Ensure default values for new fields
+    task.setdefault("crew_size", None)
+    task.setdefault("hours_per_day", 8.0)
+    task.setdefault("overtime_allowed", False)
+    task.setdefault("saturday_allowed", False)
+    task.setdefault("trade_resource", None)
+    task.setdefault("prerequisite_owner", None)
+    task.setdefault("prerequisite_status", "pending")
+    task.setdefault("prerequisite_note", None)
+    task.setdefault("risk_flag", False)
+    task.setdefault("pre_start_checklist", None)
+    task.setdefault("percent_complete", 0)
+    task.setdefault("total_float", None)
+    
+    return task
+
+
+def calculate_critical_path(tasks: List[dict]) -> List[dict]:
+    """
+    Calculate critical path using forward/backward pass.
+    Tasks with zero float are on the critical path.
+    Returns tasks with 'is_critical' and 'total_float' fields populated.
+    """
+    if not tasks:
+        return tasks
+    
+    # Build task lookup and dependency graph
+    tasks_by_id = {t["id"]: t for t in tasks}
+    
+    # Parse dates and calculate duration for each task
+    for task in tasks:
+        task["_early_start"] = None
+        task["_early_finish"] = None
+        task["_late_start"] = None
+        task["_late_finish"] = None
+        task["total_float"] = None
+        
+        # Get duration in days
+        duration = task.get("duration_days")
+        if not duration:
+            # Calculate from dates
+            start = task.get("planned_start")
+            finish = task.get("planned_finish")
+            if start and finish:
+                try:
+                    start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                    finish_dt = datetime.fromisoformat(finish.replace('Z', '+00:00'))
+                    duration = (finish_dt - start_dt).days + 1
+                except Exception:
+                    duration = 1
+            else:
+                duration = 1
+        task["_duration"] = max(1, duration or 1)
+    
+    # Topological sort based on dependencies
+    def get_predecessors(task):
+        return task.get("predecessor_ids") or []
+    
+    # Forward pass - calculate early start/finish
+    # Start with tasks that have no predecessors
+    processed = set()
+    iteration = 0
+    max_iterations = len(tasks) * 2
+    
+    while len(processed) < len(tasks) and iteration < max_iterations:
+        iteration += 1
+        for task in tasks:
+            if task["id"] in processed:
+                continue
+            
+            preds = get_predecessors(task)
+            
+            # Check if all predecessors are processed
+            if all(pid in processed or pid not in tasks_by_id for pid in preds):
+                # Calculate early start
+                if not preds:
+                    task["_early_start"] = 0
+                else:
+                    max_pred_finish = 0
+                    for pid in preds:
+                        if pid in tasks_by_id and tasks_by_id[pid].get("_early_finish") is not None:
+                            max_pred_finish = max(max_pred_finish, tasks_by_id[pid]["_early_finish"])
+                    task["_early_start"] = max_pred_finish
+                
+                task["_early_finish"] = task["_early_start"] + task["_duration"]
+                processed.add(task["id"])
+    
+    # Find project finish (max early finish)
+    project_finish = max((t.get("_early_finish") or 0) for t in tasks)
+    
+    # Backward pass - calculate late start/finish
+    # Build successor lookup
+    successors = {t["id"]: [] for t in tasks}
+    for task in tasks:
+        for pid in get_predecessors(task):
+            if pid in successors:
+                successors[pid].append(task["id"])
+    
+    processed = set()
+    iteration = 0
+    
+    while len(processed) < len(tasks) and iteration < max_iterations:
+        iteration += 1
+        for task in tasks:
+            if task["id"] in processed:
+                continue
+            
+            succs = successors.get(task["id"], [])
+            
+            # Check if all successors are processed or task has no successors
+            if all(sid in processed for sid in succs):
+                # Calculate late finish
+                if not succs:
+                    task["_late_finish"] = project_finish
+                else:
+                    min_succ_start = project_finish
+                    for sid in succs:
+                        if sid in tasks_by_id and tasks_by_id[sid].get("_late_start") is not None:
+                            min_succ_start = min(min_succ_start, tasks_by_id[sid]["_late_start"])
+                    task["_late_finish"] = min_succ_start
+                
+                task["_late_start"] = task["_late_finish"] - task["_duration"]
+                processed.add(task["id"])
+    
+    # Calculate float and mark critical tasks
+    for task in tasks:
+        if task["_early_start"] is not None and task["_late_start"] is not None:
+            total_float = task["_late_start"] - task["_early_start"]
+            task["total_float"] = max(0, total_float)
+            task["is_critical"] = total_float <= 0
+        else:
+            task["total_float"] = None
+            task["is_critical"] = False
+        
+        # Clean up internal fields
+        del task["_early_start"]
+        del task["_early_finish"]
+        del task["_late_start"]
+        del task["_late_finish"]
+        del task["_duration"]
+    
+    return tasks
+
+
+@api_router.post("/tasks", response_model=TaskResponse)
+async def create_task(task_data: TaskCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    job = await db.jobs.find_one({"id": task_data.job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    task_id = str(uuid.uuid4())
+    task = {
+        "id": task_id,
+        **task_data.model_dump(),
+        "actual_hours": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"]
+    }
+    await db.tasks.insert_one(task)
+    return TaskResponse(**task)
+
+
+@api_router.get("/tasks", response_model=List[TaskResponse])
+async def get_tasks(job_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if job_id:
+        query["job_id"] = job_id
+    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+    
+    # Calculate critical path if we have job-specific tasks
+    if job_id and len(tasks) > 1:
+        tasks = calculate_critical_path(tasks)
+    
+    # Enrich all tasks with computed warnings
+    enriched = [enrich_task_response(t, tasks) for t in tasks]
+    return [TaskResponse(**t) for t in enriched]
+
+
+@api_router.get("/tasks/{task_id}", response_model=TaskResponse)
+async def get_task(task_id: str, user: dict = Depends(get_current_user)):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Get all tasks for predecessor checking
+    all_tasks = await db.tasks.find({"job_id": task["job_id"]}, {"_id": 0}).to_list(1000)
+    enriched = enrich_task_response(task, all_tasks)
+    return TaskResponse(**enriched)
+
+
+@api_router.put("/tasks/{task_id}", response_model=TaskResponse)
+async def update_task(task_id: str, task_data: TaskCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.tasks.find_one({"id": task_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    update_data = task_data.model_dump()
+    await db.tasks.update_one({"id": task_id}, {"$set": update_data})
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    all_tasks = await db.tasks.find({"job_id": updated["job_id"]}, {"_id": 0}).to_list(1000)
+    enriched = enrich_task_response(updated, all_tasks)
+    return TaskResponse(**enriched)
+
+
+# ============== PRE-START CHECKLIST ==============
+
+class ChecklistUpdate(BaseModel):
+    checklist: List[Dict[str, Any]]
+
+
+@api_router.get("/tasks/{task_id}/checklist")
+async def get_task_checklist(task_id: str, user: dict = Depends(get_current_user)):
+    """Get pre-start checklist for a task, initializing with defaults if empty."""
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    checklist = task.get("pre_start_checklist")
+    if not checklist:
+        # Initialize with default checklist
+        checklist = [item.copy() for item in DEFAULT_PRESTART_CHECKLIST]
+    
+    # Check completion status
+    total = len(checklist)
+    completed = sum(1 for item in checklist if item.get("checked", False))
+    
+    return {
+        "task_id": task_id,
+        "task_name": task.get("task_name"),
+        "checklist": checklist,
+        "total_items": total,
+        "completed_items": completed,
+        "is_complete": completed == total
+    }
+
+
+@api_router.put("/tasks/{task_id}/checklist")
+async def update_task_checklist(task_id: str, checklist_data: ChecklistUpdate, user: dict = Depends(get_current_user)):
+    """Update pre-start checklist for a task."""
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": {"pre_start_checklist": checklist_data.checklist}}
+    )
+    
+    checklist = checklist_data.checklist
+    total = len(checklist)
+    completed = sum(1 for item in checklist if item.get("checked", False))
+    
+    return {
+        "task_id": task_id,
+        "checklist": checklist,
+        "total_items": total,
+        "completed_items": completed,
+        "is_complete": completed == total,
+        "message": "Checklist updated"
+    }
+
+
+# ============== TASK CREW/RESOURCE UPDATE ==============
+
+class TaskCrewUpdate(BaseModel):
+    crew_size: Optional[float] = None
+    hours_per_day: Optional[float] = 8.0
+    overtime_allowed: bool = False
+    saturday_allowed: bool = False
+    trade_resource: Optional[str] = None
+
+
+@api_router.put("/tasks/{task_id}/crew")
+async def update_task_crew(task_id: str, crew_data: TaskCrewUpdate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Update crew assignment for a task."""
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    update_fields = crew_data.model_dump()
+    await db.tasks.update_one({"id": task_id}, {"$set": update_fields})
+    
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    return {
+        "task_id": task_id,
+        "task_name": updated.get("task_name"),
+        **update_fields,
+        "message": "Crew assignment updated"
+    }
+
+
+# ============== TASK PREREQUISITE UPDATE ==============
+
+class TaskPrerequisiteUpdate(BaseModel):
+    prerequisite_owner: Optional[str] = None
+    prerequisite_status: str = "pending"
+    prerequisite_note: Optional[str] = None
+    risk_flag: bool = False
+
+
+@api_router.put("/tasks/{task_id}/prerequisite")
+async def update_task_prerequisite(task_id: str, prereq_data: TaskPrerequisiteUpdate, user: dict = Depends(get_current_user)):
+    """Update prerequisite tracking for a task."""
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    update_fields = prereq_data.model_dump()
+    
+    # Auto-update task status based on prerequisite
+    if prereq_data.prerequisite_status == "blocked":
+        update_fields["status"] = "blocked"
+    
+    await db.tasks.update_one({"id": task_id}, {"$set": update_fields})
+    
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    return {
+        "task_id": task_id,
+        "task_name": updated.get("task_name"),
+        **update_fields,
+        "message": "Prerequisite updated"
+    }
+
+
+# ============== RISK ANALYSIS ENDPOINT ==============
+
+@api_router.get("/jobs/{job_id}/risk-analysis")
+async def get_job_risk_analysis(job_id: str, user: dict = Depends(get_current_user)):
+    """Get risk analysis for all tasks in a job."""
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    tasks = await db.tasks.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
+    tasks_by_id = {t["id"]: t for t in tasks}
+    
+    blocked_tasks = []
+    at_risk_tasks = []
+    checklist_incomplete = []
+    
+    now = datetime.now(timezone.utc)
+    
+    for task in tasks:
+        warnings = compute_task_warnings(task, tasks)
+        
+        if warnings["is_blocked"]:
+            blocked_tasks.append({
+                "task_id": task["id"],
+                "task_name": task["task_name"],
+                "status": task.get("status"),
+                "prerequisite_owner": task.get("prerequisite_owner"),
+                "blockers": task.get("blockers"),
+                "planned_start": task.get("planned_start")
+            })
+        
+        if warnings["delay_risk"]:
+            at_risk_tasks.append({
+                "task_id": task["id"],
+                "task_name": task["task_name"],
+                "planned_start": task.get("planned_start"),
+                "status": task.get("status"),
+                "reason": "Start date approaching or passed"
+            })
+        
+        if warnings["has_incomplete_checklist"]:
+            checklist = task.get("pre_start_checklist") or []
+            incomplete_items = [item["label"] for item in checklist if not item.get("checked", False)]
+            checklist_incomplete.append({
+                "task_id": task["id"],
+                "task_name": task["task_name"],
+                "incomplete_items": incomplete_items[:3],  # First 3
+                "total_incomplete": len(incomplete_items)
+            })
+    
+    return {
+        "job_id": job_id,
+        "job_name": job.get("job_name"),
+        "summary": {
+            "total_tasks": len(tasks),
+            "blocked_count": len(blocked_tasks),
+            "at_risk_count": len(at_risk_tasks),
+            "checklist_incomplete_count": len(checklist_incomplete)
+        },
+        "blocked_tasks": blocked_tasks,
+        "at_risk_tasks": at_risk_tasks,
+        "checklist_incomplete": checklist_incomplete
+    }
+
+
+# ============== CRITICAL PATH ==============
+
+@api_router.get("/jobs/{job_id}/critical-path")
+async def get_job_critical_path(job_id: str, user: dict = Depends(get_current_user)):
+    """Get critical path analysis for a job."""
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    tasks = await db.tasks.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
+    
+    if len(tasks) < 2:
+        return {
+            "job_id": job_id,
+            "job_name": job.get("job_name"),
+            "critical_tasks": [],
+            "total_tasks": len(tasks),
+            "critical_count": 0,
+            "project_duration": 0,
+            "message": "Not enough tasks for critical path analysis"
+        }
+    
+    # Calculate critical path
+    tasks = calculate_critical_path(tasks)
+    
+    # Filter critical tasks
+    critical_tasks = [
+        {
+            "task_id": t["id"],
+            "task_name": t["task_name"],
+            "planned_start": t.get("planned_start"),
+            "planned_finish": t.get("planned_finish"),
+            "duration_days": t.get("duration_days"),
+            "total_float": t.get("total_float", 0),
+            "predecessor_ids": t.get("predecessor_ids", []),
+            "trade": t.get("trade_resource") or t.get("owner_party"),
+        }
+        for t in tasks if t.get("is_critical", False)
+    ]
+    
+    # Calculate project duration
+    project_duration = 0
+    for t in tasks:
+        if t.get("planned_start") and t.get("planned_finish"):
+            try:
+                start = datetime.fromisoformat(t["planned_start"].replace('Z', '+00:00'))
+                finish = datetime.fromisoformat(t["planned_finish"].replace('Z', '+00:00'))
+                task_days = (finish - start).days + 1
+                project_duration = max(project_duration, task_days)
+            except Exception:
+                pass
+    
+    return {
+        "job_id": job_id,
+        "job_name": job.get("job_name"),
+        "critical_tasks": critical_tasks,
+        "total_tasks": len(tasks),
+        "critical_count": len(critical_tasks),
+        "project_duration": project_duration,
+        "critical_path_length": sum(t.get("duration_days", 1) or 1 for t in critical_tasks)
+    }
+
+
+# ============== TIMESHEETS ==============
+
+@api_router.post("/timesheets")
+async def create_timesheet_entries(timesheet_data: TimesheetCreate, user: dict = Depends(get_current_user)):
+    entries = []
+    for row in timesheet_data.rows:
+        job = None
+        task = None
+        task_code_info = None
+        entry_type = (row.entry_type or "Work").strip()
+        is_non_work = entry_type in ["Annual Leave", "Public Holiday"]
+
+        if not is_non_work:
+            resolved_job_id = row.job_id
+            resolved_task_id = row.task_id
+            resolved_task_code_id = row.task_code_id
+            resolved_task_code = row.task_code
+
+            if not resolved_job_id and row.job_number:
+                job = await db.jobs.find_one({"job_number": row.job_number}, {"_id": 0})
+                if job:
+                    resolved_job_id = job["id"]
+
+            if resolved_job_id and not job:
+                job = await db.jobs.find_one({"id": resolved_job_id}, {"_id": 0})
+
+            if resolved_job_id and not job:
+                raise HTTPException(status_code=400, detail=f"Job not found: {resolved_job_id}")
+
+            if not resolved_task_code_id and resolved_task_code:
+                if resolved_job_id:
+                    matched_job_code = await db.job_task_codes.find_one(
+                        {"job_id": resolved_job_id, "code": resolved_task_code, "is_active": True},
+                        {"_id": 0}
+                    )
+                    if matched_job_code:
+                        resolved_task_code_id = matched_job_code["id"]
+
+                if not resolved_task_code_id:
+                    matched_master_code = await db.master_task_codes.find_one(
+                        {"code": resolved_task_code},
+                        {"_id": 0}
+                    )
+                    if matched_master_code:
+                        resolved_task_code_id = matched_master_code["id"]
+
+            if not resolved_task_code_id:
+                raise HTTPException(status_code=400, detail="Task code required for work entries")
+
+            if resolved_job_id and resolved_task_code_id and not resolved_task_id:
+                task = await db.tasks.find_one(
+                    {"job_id": resolved_job_id, "linked_task_codes": resolved_task_code_id},
+                    {"_id": 0}
+                )
+                if task:
+                    resolved_task_id = task["id"]
+
+            if resolved_job_id and resolved_task_id and not task:
+                task = await db.tasks.find_one(
+                    {"id": resolved_task_id, "job_id": resolved_job_id},
+                    {"_id": 0}
+                )
+                if not task:
+                    raise HTTPException(status_code=400, detail="Selected programme task not found for this job")
+
+            if resolved_job_id:
+                job_code = await db.job_task_codes.find_one(
+                    {"id": resolved_task_code_id, "job_id": resolved_job_id, "is_active": True},
+                    {"_id": 0}
+                )
+                if job_code:
+                    task_code_info = {"code": job_code["code"], "name": job_code.get("custom_label") or job_code["name"]}
+                else:
+                    master_code = await db.master_task_codes.find_one(
+                        {"id": resolved_task_code_id, "is_global_fallback": True},
+                        {"_id": 0}
+                    )
+                    if master_code:
+                        task_code_info = {"code": master_code["code"], "name": master_code["name"]}
+                    else:
+                        any_master = await db.master_task_codes.find_one({"id": resolved_task_code_id}, {"_id": 0})
+                        if any_master:
+                            task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+                        else:
+                            raise HTTPException(status_code=400, detail="Task code not found or not active for this job")
+            else:
+                master_code = await db.master_task_codes.find_one(
+                    {"id": resolved_task_code_id, "is_global_fallback": True},
+                    {"_id": 0}
+                )
+                if not master_code:
+                    any_master = await db.master_task_codes.find_one({"id": resolved_task_code_id}, {"_id": 0})
+                else:
+                    any_master = master_code
+
+                if not any_master:
+                    raise HTTPException(status_code=400, detail="Task code not found")
+
+                task_code_info = {"code": any_master["code"], "name": any_master["name"]}
+
+            row.job_id = resolved_job_id
+            row.task_id = resolved_task_id
+            row.task_code_id = resolved_task_code_id
+
+        entry_id = str(uuid.uuid4())
+        entry = {
+            "id": entry_id,
+            "user_id": user["id"],
+            "user_name": user["name"],
+            "date": row.date,
+            "job_id": None if is_non_work else row.job_id,
+            "job_number": None if is_non_work else ((job["job_number"] if job else None) or row.job_number),
+            "job_name": None if is_non_work else (job["job_name"] if job else None),
+            "task_id": None if is_non_work else row.task_id,
+            "task_name": None if is_non_work else (task["task_name"] if task else row.task_name),
+            "task_code_id": None if is_non_work else row.task_code_id,
+            "task_code": None if is_non_work else task_code_info["code"],
+            "task_code_name": None if is_non_work else task_code_info["name"],
+            "description": None if is_non_work else row.description,
+            "hours": row.hours,
+            "status": "draft",
+            "fallback_reason": None if is_non_work else row.fallback_reason,
+            "entry_type": entry_type,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "submitted_at": None,
+            "approved_at": None,
+            "approved_by": None
+        }
+        entries.append(entry)
+
+    if entries:
+        await db.timesheets.insert_many(entries)
+        for entry in entries:
+            entry.pop('_id', None)
+
+    return {"message": f"Created {len(entries)} timesheet entries", "entries": entries}
+
+
+@api_router.get("/timesheets", response_model=List[TimesheetRowResponse])
+async def get_timesheets(
+    user_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+
+    if user["role"] == UserRole.WORKER:
+        query["user_id"] = user["id"]
+    elif user_id:
+        query["user_id"] = user_id
+
+    if job_id:
+        query["job_id"] = job_id
+    if status:
+        query["status"] = status
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+
+    entries = await db.timesheets.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    return [TimesheetRowResponse(**e) for e in entries]
+
+
+@api_router.post("/timesheets/submit")
+async def submit_timesheets(entry_ids: List[str], user: dict = Depends(get_current_user)):
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "user_id": user["id"], "status": "draft"},
+        {"$set": {"status": "submitted", "submitted_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": f"Submitted {result.modified_count} entries"}
+
+
+@api_router.post("/timesheets/approve")
+async def approve_timesheets(entry_ids: List[str], user: dict = Depends(get_current_user)):
+    entries = await db.timesheets.find(
+        {"id": {"$in": entry_ids}, "status": "submitted"},
+        {"_id": 0}
+    ).to_list(1000)
+
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "status": "submitted"},
+        {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc).isoformat(), "approved_by": user["id"]}}
+    )
+
+    for entry in entries:
+        job_id = entry.get("job_id")
+        hours = entry.get("hours") or 0
+        task_code_id = entry.get("task_code_id")
+
+        if not job_id or not task_code_id:
+            continue
+
+        task = await db.tasks.find_one(
+            {
+                "job_id": job_id,
+                "linked_task_codes": task_code_id
+            },
+            {"_id": 0}
+        )
+
+        if not task:
+            continue
+
+        current_actual = task.get("actual_hours") or 0
+        try:
+            new_actual = float(current_actual) + float(hours)
+        except Exception:
+            continue
+
+        await db.tasks.update_one(
+            {"id": task["id"]},
+            {"$set": {"actual_hours": round(new_actual, 2)}}
+        )
+
+    return {"message": f"Approved {result.modified_count} entries"}
+
+
+@api_router.post("/timesheets/reject")
+async def reject_timesheets(entry_ids: List[str], user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    result = await db.timesheets.update_many(
+        {"id": {"$in": entry_ids}, "status": "submitted"},
+        {"$set": {"status": "needs_correction"}}
+    )
+    return {"message": f"Rejected {result.modified_count} entries"}
+
+
+@api_router.delete("/timesheets/{entry_id}")
+async def delete_timesheet_entry(entry_id: str, user: dict = Depends(get_current_user)):
+    entry = await db.timesheets.find_one({"id": entry_id})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    if user["role"] == UserRole.WORKER and entry["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Cannot delete other users' entries")
+
+    if entry["status"] not in ["draft", "needs_correction"]:
+        raise HTTPException(status_code=400, detail="Can only delete draft or needs_correction entries")
+
+    await db.timesheets.delete_one({"id": entry_id})
+    return {"message": "Entry deleted"}
+
+
+# ============== SUBCONTRACTORS ==============
+
+@api_router.post("/subcontractors", response_model=SubcontractorResponse)
+async def create_subcontractor(sub_data: SubcontractorCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    sub_id = str(uuid.uuid4())
+    sub = {
+        "id": sub_id,
+        **sub_data.model_dump(),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.subcontractors.insert_one(sub)
+    return SubcontractorResponse(**sub)
+
+
+@api_router.get("/subcontractors", response_model=List[SubcontractorResponse])
+async def get_subcontractors(user: dict = Depends(get_current_user)):
+    subs = await db.subcontractors.find({}, {"_id": 0}).to_list(1000)
+    return [SubcontractorResponse(**s) for s in subs]
+
+
+@api_router.put("/subcontractors/{sub_id}", response_model=SubcontractorResponse)
+async def update_subcontractor(sub_id: str, sub_data: SubcontractorCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.subcontractors.find_one({"id": sub_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Subcontractor not found")
+
+    await db.subcontractors.update_one({"id": sub_id}, {"$set": sub_data.model_dump()})
+    updated = await db.subcontractors.find_one({"id": sub_id}, {"_id": 0})
+    return SubcontractorResponse(**updated)
+
+
+# ============== MATERIALS ==============
+
+@api_router.post("/materials", response_model=MaterialResponse)
+async def create_material(mat_data: MaterialCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    task = await db.tasks.find_one({"id": mat_data.task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    mat_id = str(uuid.uuid4())
+
+    order_due = None
+    delivery_due = None
+    if task.get("planned_start"):
+        try:
+            task_start = datetime.fromisoformat(task["planned_start"].replace('Z', '+00:00'))
+            if mat_data.order_lead_time_days:
+                order_due = (task_start - timedelta(days=mat_data.order_lead_time_days)).isoformat()
+            if mat_data.delivery_buffer_days:
+                delivery_due = (task_start - timedelta(days=mat_data.delivery_buffer_days)).isoformat()
+        except Exception:
+            pass
+
+    material = {
+        "id": mat_id,
+        **mat_data.model_dump(),
+        "order_due_date": order_due,
+        "delivery_due_date": delivery_due,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.materials.insert_one(material)
+    return MaterialResponse(**material)
+
+
+@api_router.get("/materials", response_model=List[MaterialResponse])
+async def get_materials(task_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if task_id:
+        query["task_id"] = task_id
+    materials = await db.materials.find(query, {"_id": 0}).to_list(1000)
+    return [MaterialResponse(**m) for m in materials]
+
+
+@api_router.put("/materials/{mat_id}", response_model=MaterialResponse)
+async def update_material(mat_id: str, mat_data: MaterialCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.materials.find_one({"id": mat_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Material not found")
+
+    await db.materials.update_one({"id": mat_id}, {"$set": mat_data.model_dump()})
+    updated = await db.materials.find_one({"id": mat_id}, {"_id": 0})
+    return MaterialResponse(**updated)
+
+
+# ============== DELAY TRACKING ==============
+
+@api_router.post("/delays", response_model=DelayResponse)
+async def create_delay(delay_data: DelayCreate, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Record a delay and calculate roll-on effects"""
+    task = await db.tasks.find_one({"id": delay_data.task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    delay_id = str(uuid.uuid4())
+
+    affected_task_ids = []
+    all_tasks = await db.tasks.find({"job_id": task["job_id"]}, {"_id": 0}).to_list(1000)
+
+    if task.get("planned_finish"):
+        task_end = datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00'))
+        for t in all_tasks:
+            if t["id"] != task["id"] and t.get("planned_start"):
+                t_start = datetime.fromisoformat(t["planned_start"].replace('Z', '+00:00'))
+                if t_start >= task_end:
+                    affected_task_ids.append(t["id"])
+                    if t["status"] not in ["blocked", "complete"]:
+                        await db.tasks.update_one(
+                            {"id": t["id"]},
+                            {"$set": {"status": "at_risk"}}
+                        )
+
+    new_status = "delayed" if delay_data.delay_type in ["internal", "subcontractor"] else "blocked"
+    await db.tasks.update_one(
+        {"id": delay_data.task_id},
+        {"$set": {
+            "status": new_status,
+            "blockers": delay_data.description
+        }}
+    )
+
+    delay = {
+        "id": delay_id,
+        "task_id": delay_data.task_id,
+        "task_name": task["task_name"],
+        "job_id": task["job_id"],
+        "delay_type": delay_data.delay_type,
+        "delay_days": delay_data.delay_days,
+        "description": delay_data.description,
+        "caused_by": delay_data.caused_by,
+        "impact_description": delay_data.impact_description,
+        "affected_tasks": affected_task_ids,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+        "resolved": False,
+        "resolved_at": None
+    }
+    await db.delays.insert_one(delay)
+
+    return DelayResponse(**delay)
+
+
+@api_router.get("/delays", response_model=List[DelayResponse])
+async def get_delays(
+    job_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    resolved: Optional[bool] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    if job_id:
+        query["job_id"] = job_id
+    if task_id:
+        query["task_id"] = task_id
+    if resolved is not None:
+        query["resolved"] = resolved
+
+    delays = await db.delays.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [DelayResponse(**d) for d in delays]
+
+
+@api_router.post("/delays/{delay_id}/resolve")
+async def resolve_delay(delay_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    """Mark a delay as resolved"""
+    delay = await db.delays.find_one({"id": delay_id})
+    if not delay:
+        raise HTTPException(status_code=404, detail="Delay not found")
+
+    await db.delays.update_one(
+        {"id": delay_id},
+        {"$set": {
+            "resolved": True,
+            "resolved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+
+    task = await db.tasks.find_one({"id": delay["task_id"]})
+    if task and task["status"] in ["delayed", "blocked"]:
+        await db.tasks.update_one(
+            {"id": delay["task_id"]},
+            {"$set": {
+                "status": "planned",
+                "resource_analysis": {
+                    "available_days_standard": None,
+                    "available_hours_standard": None,
+                    "available_days_with_saturday": None,
+                    "available_hours_with_saturday": None,
+                    "holiday_days": None,
+                    "required_crew_standard": None,
+                    "required_crew_with_saturday": None,
+                    "requires_saturday": False,
+                    "programme_feasible": None
+                },
+                "blockers": None
+            }}
+        )
+
+    return {"message": "Delay resolved"}
+
+
+@api_router.get("/delays/impact-analysis/{task_id}")
+async def get_delay_impact(task_id: str, delay_days: int = 1, user: dict = Depends(get_current_user)):
+    """Analyze the potential impact of a delay on downstream tasks"""
+    task = await db.tasks.find_one({"id": task_id})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    all_tasks = await db.tasks.find({"job_id": task["job_id"]}, {"_id": 0}).to_list(1000)
+
+    affected = []
+    if task.get("planned_finish"):
+        task_end = datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00'))
+        new_end = task_end + timedelta(days=delay_days)
+
+        for t in all_tasks:
+            if t["id"] != task["id"] and t.get("planned_start"):
+                t_start = datetime.fromisoformat(t["planned_start"].replace('Z', '+00:00'))
+                if task_end <= t_start <= new_end:
+                    affected.append({
+                        "task_id": t["id"],
+                        "task_name": t["task_name"],
+                        "planned_start": t["planned_start"],
+                        "impact_days": delay_days,
+                        "new_start": (t_start + timedelta(days=delay_days)).isoformat()
+                    })
+
+    return {
+        "delayed_task": {
+            "id": task["id"],
+            "name": task["task_name"],
+            "current_finish": task.get("planned_finish"),
+            "new_finish": (datetime.fromisoformat(task["planned_finish"].replace('Z', '+00:00')) + timedelta(days=delay_days)).isoformat() if task.get("planned_finish") else None
+        },
+        "delay_days": delay_days,
+        "affected_tasks": affected,
+        "total_affected": len(affected)
+    }
+
+
+# ============== FILE UPLOAD & AI ANALYSIS ==============
+
+@api_router.post("/jobs/{job_id}/upload")
+async def upload_job_files(
+    job_id: str,
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    job = await db.jobs.find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_upload_dir = UPLOAD_DIR / job_id
+    job_upload_dir.mkdir(exist_ok=True)
+
+    allowed_extensions = {
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".docx",
+        ".txt",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp"
+    }
+
+    uploaded_files = []
+
+    for file in files:
+        original_filename = file.filename or "upload.bin"
+        file_ext = Path(original_filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_ext or 'unknown'}"
+            )
+
+        file_id = str(uuid.uuid4())
+        stored_filename = f"{file_id}__{Path(original_filename).name}"
+        file_path = job_upload_dir / stored_filename
+
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        parse_status = "uploaded"
+        ocr_status = "not_required"
+        reference_only = False
+        warnings = []
+
+        if file_ext in {".jpg", ".jpeg", ".png", ".webp"}:
+            parse_status = "partial"
+            ocr_status = "pending"
+            warnings.append("Image uploaded. OCR pending.")
+        elif file_ext in {".docx"}:
+            parse_status = "uploaded"
+            warnings.append("DOCX uploaded. Parsing support to be expanded.")
+        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt"}:
+            reference_only = True
+            parse_status = "reference_only"
+            warnings.append("Stored as reference only.")
+
+        file_record = {
+            "id": file_id,
+            "job_id": job_id,
+            "filename": original_filename,
+            "original_filename": original_filename,
+            "stored_filename": stored_filename,
+            "filepath": str(file_path),
+            "stored_path": str(file_path),
+            "extension": file_ext,
+            "content_type": file.content_type,
+            "size": len(content),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_by": user["id"],
+            "parse_status": parse_status,
+            "ocr_status": ocr_status,
+            "reference_only": reference_only,
+            "warnings": warnings,
+            "detected_document_type": None,
+            "needs_review": True
+        }
+
+        await db.job_files.insert_one(file_record)
+
+        uploaded_files.append({
+            "id": file_id,
+            "filename": original_filename,
+            "parse_status": parse_status,
+            "ocr_status": ocr_status,
+            "reference_only": reference_only,
+            "warnings": warnings
+        })
+
+    return {
+        "message": f"Uploaded {len(uploaded_files)} files",
+        "files": uploaded_files
+    }
+@api_router.delete("/jobs/{job_id}/files/{file_id}")
+async def delete_job_file(
+    job_id: str,
+    file_id: str,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    file_record = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    filepath = file_record.get("filepath")
+    if filepath and os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+        except Exception:
+            pass
+
+    await db.job_files.delete_one({"job_id": job_id, "id": file_id})
+
+    return {"message": "File deleted"}
+
+
+@api_router.get("/jobs/{job_id}/files")
+async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
+    files = await db.job_files.find(
+        {"job_id": job_id},
+        {"_id": 0}
+    ).sort("uploaded_at", -1).to_list(200)
     return files
 
 
@@ -4379,6 +6858,7 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
 
 
 
