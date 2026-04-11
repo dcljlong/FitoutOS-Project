@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
+        --card: 210 40% 98%;
+        --card-foreground: 222.2 84% 4.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222.2 84% 4.9%;
+        --primary: 221.2 83.2% 53.3%;
+        --primary-foreground: 210 40% 98%;
+        --secondary: 210 40% 96.1%;
+        --secondary-foreground: 222.2 47.4% 11.2%;
+        --muted: 210 40% 96.1%;
+        --muted-foreground: 215.4 16.3% 46.9%;
+        --accent: 210 40% 96.1%;
+        --accent-foreground: 222.2 47.4% 11.2%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 214.3 31.8% 91.4%;
+        --input: 214.3 31.8% 91.4%;
+        --ring: 221.2 83.2% 53.3%;
+        --radius: 0.5rem;
+        
+        /* Brand colors */
+        --brand-primary: 221.2 100% 40%;
+        --brand-orange: 24 100% 50%;
+        --brand-yellow: 45 93% 55%;
+        --brand-green: 142.1 76.2% 36.3%;
+        --brand-grey: 215 20% 65%;
+        --brand-blue: 221.2 83.2% 53.3%;
+    }
+
+    .dark {
+        --background: 222.2 84% 4.9%;
+        --foreground: 210 40% 98%;
+        --card: 222.2 84% 6%;
+        --card-foreground: 210 40% 98%;
+        --popover: 222.2 84% 6%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 217.2 91.2% 59.8%;
+        --primary-foreground: 222.2 47.4% 11.2%;
+        --secondary: 217.2 32.6% 17.5%;
+        --secondary-foreground: 210 40% 98%;
+        --muted: 217.2 32.6% 17.5%;
+        --muted-foreground: 215 20.2% 65.1%;
+        --accent: 217.2 32.6% 17.5%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 217.2 32.6% 17.5%;
+        --input: 217.2 32.6% 17.5%;
+        --ring: 224.3 76.3% 48%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground antialiased;
+        font-family: 'Public Sans', system-ui, sans-serif;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Manrope', system-ui, sans-serif;
+    }
+}
+
+/* Data/Stats typography */
+.font-data {
+    font-family: 'Barlow Condensed', system-ui, sans-serif;
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Blueprint grid pattern */
+.blueprint-grid {
+    background-image: 
+        linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+        linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
+/* Status colors */
+.status-planned { @apply bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300; }
+.status-active { @apply bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300; }
+.status-on-track { @apply bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300; }
+.status-at-risk { @apply bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300; }
+.status-delayed { @apply bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300; }
+.status-blocked { @apply bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300; }
+.status-waiting { @apply bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300; }
+.status-complete { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    @apply bg-muted/50 rounded-full;
+}
+
+::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50;
+}
+
+/* Table improvements */
+.data-table {
+    @apply w-full text-sm;
+}
+
+.data-table th {
+    @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/50;
+}
+
+.data-table td {
+    @apply px-4 py-3 border-b border-border/50;
+}
+
+.data-table tr:hover td {
+    @apply bg-muted/30;
+}
+
+/* Card hover effect */
+.card-hover {
+    @apply transition-all duration-200 hover:shadow-md hover:border-primary/30;
+}
+
+/* Animation utilities */
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-in {
+    animation: slideIn 0.3s ease-out forwards;
+}
+
+/* Mobile touch targets */
+@media (max-width: 768px) {
+    .touch-target {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* Debug wrapper reset */
+[data-debug-wrapper="true"] {
+    display: contents !important;
+}

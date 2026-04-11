@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -58,7 +58,6 @@ import {
   AlertCircle,
   Timer,
   XCircle,
-  BarChart3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -107,7 +106,9 @@ export default function JobDetailPage() {
   const [subcontractors, setSubcontractors] = useState([]);
   const [delays, setDelays] = useState([]);
   const [programme, setProgramme] = useState([]);
+  const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [analysis, setAnalysis] = useState(null);
   
   // Task dialog state
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
@@ -163,19 +164,25 @@ export default function JobDetailPage() {
 
   const fetchJobData = useCallback(async () => {
     try {
-      const jobRes = await api.get(`/jobs/${jobId}`);
-      const tasksRes = await api.get(`/tasks?job_id=${jobId}`);
-      const codesRes = await api.get(`/jobs/${jobId}/task-codes`);
-      let subsRes = { data: [] }; try { subsRes = await api.get('/subcontractors'); } catch (e) { /* subcontractors endpoint optional */ }
-      const delaysRes = await api.get(`/delays?job_id=${jobId}`);
-      const programmeRes = await api.get(`/jobs/${jobId}/programme`);
-
+      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, unmatchedRes, analysisRes] = await Promise.all([
+        api.get(`/jobs/${jobId}`),
+        api.get(`/tasks?job_id=${jobId}`),
+        api.get(`/jobs/${jobId}/task-codes`),
+        api.get('/subcontractors'),
+        api.get(`/delays?job_id=${jobId}`),
+        api.get(`/jobs/${jobId}/programme`),
+        api.get(`/jobs/${jobId}/unmatched-labour`),
+        api.post(`/jobs/${jobId}/analyze`),
+      ]);
+      console.log('JOBDETAIL tasksRes.data =', tasksRes.data);
       setJob(jobRes.data);
-      setTasks(tasksRes.data?.value || tasksRes.data || []);
+      setTasks(Array.isArray(tasksRes.data) ? tasksRes.data : (tasksRes.data?.value || []));
       setTaskCodes(codesRes.data);
       setSubcontractors(subsRes.data);
       setDelays(delaysRes.data);
       setProgramme(programmeRes.data);
+      setUnmatchedLabour(unmatchedRes.data.rows || []);
+      setAnalysis(analysisRes.data.analysis || null);
     } catch (error) {
       toast.error('Failed to load job details');
     } finally {
@@ -425,8 +432,13 @@ export default function JobDetailPage() {
     );
   }
 
+  const getTaskActual = (task) => parseFloat(task.actual_hours || 0);
+  const getTaskPlanned = (task) => parseFloat(task.quoted_hours || 0);
+  const getTaskVariance = (task) => getTaskActual(task) - getTaskPlanned(task);
   const completedTasks = tasks.filter(t => t.status === 'complete').length;
   const taskProgress = tasks.length > 0 ? (completedTasks / tasks.length) * 100 : 0;
+  const unmatchedLabourCount = unmatchedLabour.length;
+  const unmatchedLabourHours = unmatchedLabour.reduce((sum, row) => sum + (parseFloat(row.hours) || 0), 0);
 
   return (
     <div className="space-y-6" data-testid="job-detail-page">
@@ -448,29 +460,21 @@ export default function JobDetailPage() {
           
           {canManage() && (
             <div className="flex gap-2 flex-wrap">
-              <Link to={`/jobs/${jobId}/gantt`}>
-                <Button variant="outline">
-                  <BarChart3 className="mr-2 h-4 w-4" />
-                  Gantt Chart
-                </Button>
-              </Link>
               <Link to={`/resource-analysis/${jobId}`}>
                 <Button variant="outline">
                   Resource Analysis
                 </Button>
               </Link>
-              <Link to={`/jobs/${jobId}/setup?step=0`}>
+              <Link to={`/jobs/${jobId}/setup`}>
                 <Button variant="outline">
                   <Upload className="mr-2 h-4 w-4" />
                   Upload & Analyze
                 </Button>
               </Link>
-              <Link to={`/jobs/${jobId}/setup?step=0`}>
-                <Button variant="outline">
-                  <Edit className="mr-2 h-4 w-4" />
-                  Edit Job
-                </Button>
-              </Link>
+                <Button variant="outline" onClick={() => { window.location.href = `/jobs/${jobId}/setup?step=0`; }}>
+                <Edit className="mr-2 h-4 w-4" />
+                Edit Job
+              </Button>
             </div>
           )}
         </div>
@@ -538,6 +542,24 @@ export default function JobDetailPage() {
       {/* Progress Overview */}
       <Card>
         <CardHeader>
+          <CardTitle className="text-lg">Unmatched Labour</CardTitle>
+          <CardDescription>Imported labour not yet linked to a task</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="text-center p-4 rounded-lg bg-amber-500/10">
+              <p className="font-data text-2xl font-bold text-amber-600">{unmatchedLabourCount}</p>
+              <p className="text-sm text-muted-foreground">Unmatched Rows</p>
+            </div>
+            <div className="text-center p-4 rounded-lg bg-amber-500/10">
+              <p className="font-data text-2xl font-bold text-amber-600">{unmatchedLabourHours.toFixed(2)}</p>
+              <p className="text-sm text-muted-foreground">Unmatched Hours</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle className="text-lg">Progress Overview</CardTitle>
         </CardHeader>
         <CardContent>
@@ -575,6 +597,70 @@ export default function JobDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+
+      {/* ============================= */}
+      {/* LD RISK DASHBOARD */}
+      {/* ============================= */}
+
+      {analysis?.ld_risk && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">LD Risk Overview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <div className="bg-red-50 border border-red-200 rounded p-4">
+                <h3 className="font-semibold text-red-700 mb-1">High Risk</h3>
+                <p className="text-xs text-red-600 mb-3">
+                  {analysis.ld_risk.summary.high_risk_count} items
+                </p>
+                <div className="space-y-1 text-xs max-h-40 overflow-auto">
+                  {analysis.ld_risk.high_risk_tasks.slice(0,10).map((t,i)=>(
+                    <div key={i} className="border-b border-red-100 pb-1">
+                      {t.description?.replace(/^\*\s*/,"")}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
+                <h3 className="font-semibold text-yellow-700 mb-1">External</h3>
+                <p className="text-xs text-yellow-700 mb-3">
+                  {analysis.ld_risk.summary.external_dependency_count} items
+                </p>
+                <div className="space-y-1 text-xs max-h-40 overflow-auto">
+                  {analysis.ld_risk.external_dependencies.slice(0,10).map((t,i)=>(
+                    <div key={i} className="border-b border-yellow-100 pb-1">
+                      {t.description?.replace(/^\*\s*/,"")}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded p-4">
+                <h3 className="font-semibold mb-2">Contract Split</h3>
+                <div className="text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span>Fitout</span>
+                    <span className="font-semibold">{analysis.contract_split.fitout.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Base Build</span>
+                    <span className="font-semibold">{analysis.contract_split.base_build.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Shared</span>
+                    <span className="font-semibold">{analysis.contract_split.shared.length}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabs for Details */}
       <Tabs defaultValue="tasks" className="space-y-4">
@@ -679,8 +765,8 @@ export default function JobDetailPage() {
                       </div>
 
                       <div className="text-sm text-muted-foreground mt-1">
-                        {item.phase && `${item.phase} • `}
-                        {item.trade && `${item.trade} • `}
+                        {item.phase && `${item.phase} â€¢ `}
+                        {item.trade && `${item.trade} â€¢ `}
                         {item.duration && `${item.duration} ${item.duration_unit}`}
                       </div>
 
@@ -760,6 +846,13 @@ export default function JobDetailPage() {
                           {task.quoted_hours && (
                             <span>{task.quoted_hours}h quoted</span>
                           )}
+                          <>
+                            <span>Planned: {getTaskPlanned(task).toFixed(2)}h</span>
+                            <span>Actual: {getTaskActual(task).toFixed(2)}h</span>
+                            <span className={getTaskVariance(task) > 0 ? "text-red-600 font-medium" : getTaskVariance(task) < 0 ? "text-green-600 font-medium" : ""}>
+                              Variance: {getTaskVariance(task) > 0 ? "+" : ""}{getTaskVariance(task).toFixed(2)}h
+                            </span>
+                          </>
                           {task.linked_task_codes?.length > 0 && (
                             <span className="flex items-center gap-1">
                               <ClipboardList className="h-3 w-3" />
@@ -1118,7 +1211,7 @@ export default function JobDetailPage() {
                 </div>
                 <SheetTitle className="text-xl">{selectedTask.task_name}</SheetTitle>
                 <SheetDescription>
-                  {selectedTask.task_type && `${selectedTask.task_type} â€¢ `}
+                  {selectedTask.task_type && `${selectedTask.task_type} Ã¢â‚¬Â¢ `}
                   {selectedTask.zone_area && `${selectedTask.zone_area}`}
                 </SheetDescription>
               </SheetHeader>
@@ -1525,10 +1618,6 @@ export default function JobDetailPage() {
     </div>
   );
 }
-
-
-
-
 
 
 

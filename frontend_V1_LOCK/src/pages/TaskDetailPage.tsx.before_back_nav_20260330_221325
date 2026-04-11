@@ -1,0 +1,121 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import api from "@/lib/api";
+
+export default function TaskDetailPage() {
+  const { task_id } = useParams();
+
+  const [task, setTask] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadTask() {
+      try {
+        setIsLoading(true);
+        setHasError(false);
+
+        const response = await api.get(`/tasks/${task_id}`);
+
+        if (mounted) {
+          setTask(response.data);
+        }
+      } catch (err) {
+        if (mounted) {
+          setHasError(true);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    if (task_id) {
+      loadTask();
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [task_id]);
+
+  if (isLoading) {
+    return (
+      <div className="p-8 max-w-5xl mx-auto text-muted-foreground">
+        Loading task...
+      </div>
+    );
+  }
+
+  if (hasError || !task) {
+    return (
+      <div className="p-8 max-w-5xl mx-auto text-red-500">
+        Failed to load task
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto space-y-6">
+
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {task.task_name}
+        </h1>
+        <div className="text-sm text-muted-foreground">
+          Task ID: {task_id}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Duration (Days)</div>
+          <div className="text-lg font-medium">
+            {task.duration_days ?? "-"}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Total Float</div>
+          <div className="text-lg font-medium">
+            {task.total_float ?? "-"}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Early Start</div>
+          <div className="text-lg font-medium">
+            {task.early_start ?? "-"}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Early Finish</div>
+          <div className="text-lg font-medium">
+            {task.early_finish ?? "-"}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Crew Required</div>
+          <div className="text-lg font-medium">
+            {task.crew_required ?? "-"}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">Quoted Hours</div>
+          <div className="text-lg font-medium">
+            {task.quoted_hours ?? "-"}
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  );
+}

@@ -1,0 +1,25 @@
+import { useParams } from "react-router-dom";
+
+export default function TaskDetailPage() {
+  const { task_id } = useParams();
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        Task Detail
+      </h1>
+
+      <div className="text-sm text-muted-foreground">
+        Task ID
+      </div>
+
+      <div className="text-lg font-mono bg-muted p-3 rounded">
+        {task_id}
+      </div>
+
+      <div className="text-sm text-muted-foreground">
+        (Detail view coming next)
+      </div>
+    </div>
+  );
+}

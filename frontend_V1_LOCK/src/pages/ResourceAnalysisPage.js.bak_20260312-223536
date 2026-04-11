@@ -1,0 +1,23 @@
+import React from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+export default function ResourceAnalysisPage() {
+  return (
+    <div className="space-y-6" data-testid="resource-analysis-page">
+      <div>
+        <h1 className="text-3xl font-bold font-['Manrope']">Resource Analysis</h1>
+        <p className="text-muted-foreground mt-1">Labour intelligence by task</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Resource Analysis</CardTitle>
+          <CardDescription>Page shell created. Data wiring next.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">Pending endpoint integration: /api/jobs/:jobId/resource-analysis</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

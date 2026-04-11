@@ -1,0 +1,320 @@
+﻿import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import api from "@/lib/api";
+
+const JOB_ID = "27ea5733-726f-4d62-a464-22989ca44736";
+const TEST_EMAIL = "test@fitout.com";
+const TEST_PASSWORD = "123456";
+
+function getFlagClasses(flag: string) {
+  switch (flag) {
+    case "SEQUENCE ISSUE":
+      return {
+        card: "border-red-200 bg-red-50/60",
+        badge: "bg-red-100 text-red-700 border-red-200",
+        action: "text-red-700",
+      };
+    case "PARALLEL OPPORTUNITY":
+      return {
+        card: "border-violet-200 bg-violet-50/60",
+        badge: "bg-violet-100 text-violet-700 border-violet-200",
+        action: "text-violet-700",
+      };
+    case "STARTING TASK":
+      return {
+        card: "border-emerald-200 bg-emerald-50/60",
+        badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
+        action: "text-emerald-700",
+      };
+    case "DRIVES NEXT TRADE":
+      return {
+        card: "border-blue-200 bg-blue-50/60",
+        badge: "bg-blue-100 text-blue-700 border-blue-200",
+        action: "text-blue-700",
+      };
+    case "FINISH CRITICAL":
+      return {
+        card: "border-amber-200 bg-amber-50/60",
+        badge: "bg-amber-100 text-amber-700 border-amber-200",
+        action: "text-amber-700",
+      };
+    default:
+      return {
+        card: "border-border/60 bg-white",
+        badge: "bg-slate-100 text-slate-600 border-slate-200",
+        action: "text-slate-600",
+      };
+  }
+}
+
+function getCodeClasses(code: string) {
+  switch (code) {
+    case "103":
+      return "bg-slate-900 text-white";
+    case "105":
+      return "bg-blue-600 text-white";
+    case "106":
+      return "bg-amber-500 text-white";
+    case "107":
+      return "bg-emerald-600 text-white";
+    case "111":
+      return "bg-red-600 text-white";
+    case "101":
+      return "bg-violet-600 text-white";
+    default:
+      return "bg-slate-200 text-slate-700";
+  }
+}
+
+function getTradeBucket(code: string) {
+  switch (code) {
+    case "103":
+      return "Framing";
+    case "105":
+      return "Linings";
+    case "106":
+      return "Stopping";
+    case "107":
+      return "Insulation";
+    case "111":
+      return "Fire Rating";
+    case "101":
+      return "Ceilings";
+    default:
+      return "Other";
+  }
+}
+
+export default function DashboardPage() {
+  const navigate = useNavigate();
+  const [data, setData] = useState<any>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function ensureTestLogin() {
+      const existingToken = localStorage.getItem("token");
+      if (existingToken) return;
+
+      const loginResponse = await api.post("/auth/login", {
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      });
+
+      const accessToken = loginResponse?.data?.access_token;
+      if (accessToken) {
+        localStorage.setItem("token", accessToken);
+        api.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        setIsLoading(true);
+        setHasError(false);
+
+        await ensureTestLogin();
+
+        const [dashRes, taskRes] = await Promise.all([
+          api.get(`/jobs/${JOB_ID}/dashboard-summary`),
+          api.get(`/tasks?job_id=${JOB_ID}`),
+        ]);
+
+        if (mounted) {
+          setData(dashRes.data);
+          setTasks(taskRes.data);
+        }
+      } catch (error) {
+        if (mounted) setHasError(true);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    }
+
+    loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (isLoading) {
+    return <div className="p-8 text-muted-foreground">Loading dashboard...</div>;
+  }
+
+  if (hasError || !data) {
+    return <div className="p-8 text-red-500">Failed to load dashboard</div>;
+  }
+
+  const taskMap: any = {};
+  tasks.forEach((t) => {
+    taskMap[t.id] = t;
+  });
+
+  const myTasks = tasks.filter((t) => t.task_code);
+
+  function buildTaskView(t: any) {
+    const predecessors = (t.predecessor_ids || [])
+      .map((id: string) => taskMap[id]?.task_name)
+      .filter(Boolean);
+
+    const successors = tasks
+      .filter((x) => (x.predecessor_ids || []).includes(t.id))
+      .map((x) => x.task_name);
+
+    let flag = "";
+    let action = "";
+
+    if (
+      t.task_name?.toLowerCase().includes("insulation") &&
+      predecessors.join(" ").toLowerCase().includes("stopping")
+    ) {
+      flag = "SEQUENCE ISSUE";
+      action = "Move insulation earlier";
+    } else if (successors.length > 1) {
+      flag = "PARALLEL OPPORTUNITY";
+      action = "Split crews / overlap work";
+    } else if (!predecessors.length && t.task_name?.toLowerCase().includes("framing")) {
+      flag = "STARTING TASK";
+      action = "Confirm ready to start";
+    } else if (successors.join(" ").toLowerCase().includes("wall linings")) {
+      flag = "DRIVES NEXT TRADE";
+      action = "Protect finish date";
+    } else if (successors.join(" ").toLowerCase().includes("stopping")) {
+      flag = "FINISH CRITICAL";
+      action = "Quality handoff critical";
+    }
+
+    return {
+      ...t,
+      tradeBucket: getTradeBucket(t.task_code),
+      predecessors,
+      successors,
+      flag,
+      action,
+    };
+  }
+
+  const myTaskView = myTasks.map(buildTaskView);
+
+  const groupedTasks = myTaskView.reduce((acc: Record<string, any[]>, task: any) => {
+    if (!acc[task.tradeBucket]) {
+      acc[task.tradeBucket] = [];
+    }
+    acc[task.tradeBucket].push(task);
+    return acc;
+  }, {});
+
+  const bucketOrder = ["Framing", "Linings", "Fire Rating", "Stopping", "Ceilings", "Insulation", "Other"];
+  const visibleBuckets = bucketOrder.filter((bucket) => groupedTasks[bucket]?.length);
+
+  return (
+    <div className="p-8 space-y-8 max-w-7xl mx-auto">
+      <div className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">My Task Dashboard</h1>
+        <p className="text-sm text-slate-500">
+          Trade-only view. Direct predecessors, direct impacts, sequence issues, and acceleration opportunities.
+        </p>
+      </div>
+
+      <Card className="border border-border/60 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-xl">My Tasks (Trade View)</CardTitle>
+          <div className="text-sm text-muted-foreground">
+            {myTaskView.length} mapped trade tasks
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-8">
+          {visibleBuckets.map((bucket) => (
+            <div key={bucket} className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="text-base font-semibold text-slate-900">{bucket}</div>
+                <div className="h-px flex-1 bg-border/70" />
+                <div className="text-xs uppercase tracking-wide text-slate-500">
+                  {groupedTasks[bucket].length} task{groupedTasks[bucket].length === 1 ? "" : "s"}
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                {groupedTasks[bucket].map((t: any) => {
+                  const flagStyles = getFlagClasses(t.flag);
+
+                  return (
+                    <div
+                      key={t.id}
+                      className={`rounded-2xl border p-5 shadow-sm transition hover:shadow-md hover:-translate-y-[1px] cursor-pointer ${flagStyles.card}`}
+                      onClick={() => navigate(`/tasks/${t.id}`)}
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="space-y-2 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getCodeClasses(t.task_code)}`}>
+                              {t.task_code}
+                            </span>
+
+                            {t.flag && (
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${flagStyles.badge}`}>
+                                {t.flag}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-lg font-semibold text-slate-900 leading-snug">
+                            {t.task_name}
+                          </div>
+
+                          <div className="text-sm text-slate-500">
+                            {t.planned_start} → {t.planned_finish}
+                          </div>
+                        </div>
+
+                        <div className="text-xs uppercase tracking-wide text-slate-500 shrink-0">
+                          {t.tradeBucket}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-border/60 bg-white/80 p-3">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                            Driven by
+                          </div>
+                          <div className="text-sm text-slate-800">
+                            {t.predecessors.length ? t.predecessors.join(", ") : "-"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-border/60 bg-white/80 p-3">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                            Drives
+                          </div>
+                          <div className="text-sm text-slate-800">
+                            {t.successors.length ? t.successors.join(", ") : "-"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {t.action && (
+                        <div className="mt-4 rounded-xl border border-border/60 bg-white/80 p-3">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                            Recommended action
+                          </div>
+                          <div className={`text-sm font-medium ${flagStyles.action}`}>
+                            {t.action}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -1,0 +1,23 @@
+﻿ARCHITECTURE LOCK
+
+Primary labour input:
+- Timesheet Manager app
+
+FitoutOS role:
+- programme
+- task control
+- dashboard
+- actual vs planned analysis
+- approved labour consumption
+
+FitoutOS internal /timesheets page:
+- backup/admin/testing only
+- not primary labour workflow
+- do not extend unless explicitly required
+
+Change protocol:
+1. Read live file first
+2. Anchor search
+3. Surgical patch only
+4. Build
+5. Backup stable

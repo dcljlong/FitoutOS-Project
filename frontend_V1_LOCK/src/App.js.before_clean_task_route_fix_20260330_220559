@@ -1,0 +1,18 @@
+import DashboardPage from "./pages/DashboardPage.tsx";
+import TaskDetailPage from "./pages/TaskDetailPage.tsx";
+import { AuthProvider } from "./contexts/AuthContext";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/login" element={<DashboardPage />} />`r`n          <Route path="/tasks/:task_id" element={<TaskDetailPage />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}

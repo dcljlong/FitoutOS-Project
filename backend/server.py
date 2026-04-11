@@ -1,4 +1,8 @@
-﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
+﻿
+@app.get("/")
+def root():
+    return {"status": "FitoutOS backend running"}
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -6858,6 +6862,7 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
 
 
 

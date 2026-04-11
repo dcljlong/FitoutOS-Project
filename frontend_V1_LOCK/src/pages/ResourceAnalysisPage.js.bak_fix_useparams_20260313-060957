@@ -1,0 +1,94 @@
+import React, { useEffect, useState } from "react";
+import api from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+export default function ResourceAnalysisPage({ jobId }) {
+  const [loading, setLoading] = useState(true);
+  const [analysis, setAnalysis] = useState(null);
+
+  useEffect(() => {
+    if (!jobId) return;
+    setLoading(true);
+    api.get(`/jobs/${jobId}/resource-analysis`)
+      .then(res => setAnalysis(res))
+      .catch(() => toast.error("Failed to load resource analysis"))
+      .finally(() => setLoading(false));
+  }, [jobId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!analysis) {
+    return (
+      <div className="p-4 text-muted-foreground">
+        No resource analysis data available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="resource-analysis-page">
+      <div>
+        <h1 className="text-3xl font-bold font-['Manrope']">Resource Analysis</h1>
+        <p className="text-muted-foreground mt-1">Labour intelligence by task</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Summary</CardTitle>
+          <CardDescription>Totals and overall status</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p>Total Tasks: {analysis.summary.total_tasks}</p>
+          <p>Total Quoted Hours: {analysis.summary.total_quoted_hours}</p>
+          <p>Total Actual Hours: {analysis.summary.total_actual_hours}</p>
+          <p>Overall Status: {analysis.summary.overall_status}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Task Breakdown</CardTitle>
+          <CardDescription>Individual task details</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Task Name</th>
+                  <th>Planned Start</th>
+                  <th>Planned Finish</th>
+                  <th>Quoted Hours</th>
+                  <th>Actual Hours</th>
+                  <th>Variance</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analysis.tasks.map(task => (
+                  <tr key={task.task_id}>
+                    <td>{task.task_name}</td>
+                    <td>{task.planned_start}</td>
+                    <td>{task.planned_finish}</td>
+                    <td>{task.quoted_hours}</td>
+                    <td>{task.actual_hours}</td>
+                    <td>{task.hours_variance}</td>
+                    <td>{task.programme_feasible}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

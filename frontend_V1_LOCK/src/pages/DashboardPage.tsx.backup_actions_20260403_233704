@@ -1,0 +1,313 @@
+﻿import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import api from "@/lib/api";
+
+const JOB_ID = "27ea5733-726f-4d62-a464-22989ca44736";
+const TEST_EMAIL = "test@fitout.com";
+const TEST_PASSWORD = "123456";
+
+function getHealthColor(band: string) {
+  switch (band) {
+    case "EXCELLENT":
+      return "text-green-600";
+    case "GOOD":
+      return "text-teal-600";
+    case "FAIR":
+      return "text-amber-600";
+    case "POOR":
+      return "text-red-600";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
+export default function DashboardPage() {
+  const [data, setData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function ensureTestLogin() {
+      const existingToken = localStorage.getItem("token");
+      if (existingToken) return;
+
+      const loginResponse = await api.post("/auth/login", {
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      });
+
+      const accessToken = loginResponse?.data?.access_token;
+      if (accessToken) {
+        localStorage.setItem("token", accessToken);
+        api.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        setIsLoading(true);
+        setHasError(false);
+
+        await ensureTestLogin();
+
+        const response = await api.get(`/jobs/${JOB_ID}/dashboard-summary`);
+
+        if (mounted) {
+          setData(response.data);
+        }
+      } catch (error) {
+        if (mounted) {
+          setHasError(true);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (isLoading) {
+    return <div className="p-6">Loading dashboard...</div>;
+  }
+
+  if (hasError || !data) {
+    return <div className="p-6 text-red-500">Failed to load dashboard</div>;
+  }
+
+  const health = data.health || {};
+  const metrics = data.headline || {};
+
+  return (
+    <div className="p-6 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Project Health</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between">
+          <div className="text-4xl font-semibold">
+            {health.health_score ?? 0}
+          </div>
+          <div className={`text-lg font-medium ${getHealthColor(health.health_band)}`}>
+            {health.health_band || "N/A"}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Duration (Days)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.project_duration_days ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Critical Tasks</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.critical_task_count ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Near Critical</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.near_critical_task_count ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Recommended Crew</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {data.resource_flags?.recommended_crew ?? "-"}
+          </CardContent>
+        </Card>
+      </div>
+    
+      {/* ============================= */}
+      {/* CRITICAL PATH SNAPSHOT */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Critical Path Snapshot</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="text-sm text-muted-foreground">Start Task</div>
+              <div className="font-medium">
+                {data.critical_path_headline?.start_task?.task_name || "-"}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Day {data.critical_path_headline?.start_task?.early_start ?? "-"} ? {data.critical_path_headline?.start_task?.early_finish ?? "-"}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-sm text-muted-foreground">Finish Task</div>
+              <div className="font-medium">
+                {data.critical_path_headline?.finish_task?.task_name || "-"}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Day {data.critical_path_headline?.finish_task?.early_start ?? "-"} ? {data.critical_path_headline?.finish_task?.early_finish ?? "-"}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    
+      {/* ============================= */}
+      {/* HIGHEST RISK TASKS */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Highest Risk Tasks</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Task</th>
+                  <th className="py-2">Risk</th>
+                  <th className="py-2">Impact (Days)</th>
+                  <th className="py-2">Impacted Tasks</th>
+                  <th className="py-2">Crew Required</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.highest_risk_tasks || []).map((t: any) => (
+                  <tr key={t.task_id} className="border-b">
+                    <td className="py-2">{t.task_name}</td>
+                    <td className={
+                      t.risk_band === "HIGH"
+                        ? "text-red-600 font-medium"
+                        : t.risk_band === "MEDIUM"
+                        ? "text-amber-600 font-medium"
+                        : "text-muted-foreground"
+                    }>
+                      {t.risk_band}
+                    </td>
+                    <td className="py-2">{t.project_duration_impact_days}</td>
+                    <td className="py-2">{t.impacted_task_count}</td>
+                    <td className="py-2">
+                      {t.crew_required_for_delay_recovery?.toFixed?.(2) ?? "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    
+      {/* ============================= */}
+      {/* FLOAT OPPORTUNITIES */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Float Opportunities</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {(data.top_float_tasks || []).map((t: any) => (
+              <div key={t.task_id} className="border rounded-md p-3">
+                <div className="font-medium">{t.task_name}</div>
+                <div className="text-sm text-muted-foreground">
+                  Float: {t.total_float} days
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  Day {t.early_start} ? {t.early_finish}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    
+      {/* ============================= */}
+      {/* PULL-FORWARD OPPORTUNITIES */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Pull-Forward Opportunities</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(data.pull_forward_tasks || []).length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No current pull-forward candidates
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(data.pull_forward_tasks || []).map((t: any) => (
+                <div key={t.task_id} className="border rounded-md p-3">
+                  <div className="font-medium">{t.task_name}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Possible early start: Day {t.possible_early_start ?? "-"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {/* ============================= */}
+      {/* NEAR PULL-FORWARD (ALMOST AVAILABLE) */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Near Pull-Forward (Almost Available)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(data.top_float_tasks || []).length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No near pull-forward opportunities
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(data.top_float_tasks || []).map((t: any) => (
+                <div key={t.task_id} className="border rounded-md p-3">
+                  <div className="font-medium">{t.task_name}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Float: {t.total_float ?? 0} days
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Potential early window: Day {t.early_start} ? {t.early_finish}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+

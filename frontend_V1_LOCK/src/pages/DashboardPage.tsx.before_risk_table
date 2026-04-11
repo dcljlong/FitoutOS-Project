@@ -1,0 +1,178 @@
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import api from "@/lib/api";
+
+const JOB_ID = "27ea5733-726f-4d62-a464-22989ca44736";
+const TEST_EMAIL = "test@fitout.com";
+const TEST_PASSWORD = "123456";
+
+function getHealthColor(band: string) {
+  switch (band) {
+    case "EXCELLENT":
+      return "text-green-600";
+    case "GOOD":
+      return "text-teal-600";
+    case "FAIR":
+      return "text-amber-600";
+    case "POOR":
+      return "text-red-600";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
+export default function DashboardPage() {
+  const [data, setData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function ensureTestLogin() {
+      const existingToken = localStorage.getItem("token");
+      if (existingToken) return;
+
+      const loginResponse = await api.post("/auth/login", {
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      });
+
+      const accessToken = loginResponse?.data?.access_token;
+      if (accessToken) {
+        localStorage.setItem("token", accessToken);
+        api.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        setIsLoading(true);
+        setHasError(false);
+
+        await ensureTestLogin();
+
+        const response = await api.get(`/jobs/${JOB_ID}/dashboard-summary`);
+
+        if (mounted) {
+          setData(response.data);
+        }
+      } catch (error) {
+        if (mounted) {
+          setHasError(true);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (isLoading) {
+    return <div className="p-6">Loading dashboard...</div>;
+  }
+
+  if (hasError || !data) {
+    return <div className="p-6 text-red-500">Failed to load dashboard</div>;
+  }
+
+  const health = data.health || {};
+  const metrics = data.headline || {};
+
+  return (
+    <div className="p-6 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Project Health</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between">
+          <div className="text-4xl font-semibold">
+            {health.health_score ?? 0}
+          </div>
+          <div className={`text-lg font-medium ${getHealthColor(health.health_band)}`}>
+            {health.health_band || "N/A"}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Duration (Days)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.project_duration_days ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Critical Tasks</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.critical_task_count ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Near Critical</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {metrics.near_critical_task_count ?? "-"}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Recommended Crew</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {data.resource_flags?.recommended_crew ?? "-"}
+          </CardContent>
+        </Card>
+      </div>
+    
+      {/* ============================= */}
+      {/* CRITICAL PATH SNAPSHOT */}
+      {/* ============================= */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Critical Path Snapshot</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2">
+            <div>
+              <div className="text-sm text-muted-foreground">Start Task</div>
+              <div className="font-medium">
+                {data.critical_path_headline?.start_task?.task_name || "-"}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Day {data.critical_path_headline?.start_task?.early_start ?? "-"} ? {data.critical_path_headline?.start_task?.early_finish ?? "-"}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-sm text-muted-foreground">Finish Task</div>
+              <div className="font-medium">
+                {data.critical_path_headline?.finish_task?.task_name || "-"}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Day {data.critical_path_headline?.finish_task?.early_start ?? "-"} ? {data.critical_path_headline?.finish_task?.early_finish ?? "-"}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+

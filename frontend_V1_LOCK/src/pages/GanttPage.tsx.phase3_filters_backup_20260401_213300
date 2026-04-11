@@ -1,0 +1,217 @@
+﻿import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import api from "@/lib/api";
+
+type TaskItem = {
+  id: string;
+  task_name?: string;
+  task_type?: string;
+  early_start?: number;
+  early_finish?: number;
+  total_float?: number;
+  is_critical?: boolean;
+  planned_start?: string;
+  planned_finish?: string;
+};
+
+function formatDate(value?: string) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString();
+}
+
+function addDays(base: Date, days: number) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatShortHeaderDate(value: Date) {
+  return value.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short"
+  });
+}
+
+export default function GanttPage() {
+  const { job_id } = useParams();
+  const navigate = useNavigate();
+
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [job, setJob] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [hoveredTask, setHoveredTask] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      if (!job_id) {
+        setTasks([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const [jobRes, tasksRes] = await Promise.all([
+          api.get(`/jobs/${job_id}`),
+          api.get(`/tasks?job_id=${job_id}`)
+        ]);
+
+        setJob(jobRes.data || null);
+
+        const incoming = Array.isArray(tasksRes.data) ? tasksRes.data : [];
+
+        const cleaned = incoming
+          .filter((t: TaskItem) => t && t.id)
+          .sort((a: TaskItem, b: TaskItem) => {
+            const aStart = a.early_start ?? 0;
+            const bStart = b.early_start ?? 0;
+            if (aStart !== bStart) return aStart - bStart;
+
+            const aFinish = a.early_finish ?? 0;
+            const bFinish = b.early_finish ?? 0;
+            return aFinish - bFinish;
+          });
+
+        setTasks(cleaned);
+      } catch (e) {
+        console.error(e);
+        setJob(null);
+        setTasks([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, [job_id]);
+
+  const maxFinish = useMemo(() => {
+    if (!tasks.length) return 1;
+    return Math.max(...tasks.map((t) => t.early_finish ?? 0), 1);
+  }, [tasks]);
+
+  const calendarHeader = useMemo(() => {
+    const totalDays = Math.min(maxFinish + 1, 50);
+    const baseDate = job?.planned_start ? new Date(job.planned_start) : null;
+    const weekdayNames = ["S", "M", "T", "W", "T", "F", "S"];
+
+    return Array.from({ length: totalDays }).map((_, i) => {
+      const current = baseDate && !Number.isNaN(baseDate.getTime())
+        ? addDays(baseDate, i)
+        : null;
+
+      return {
+        dayOffset: i,
+        weekday: current ? weekdayNames[current.getDay()] : weekdayNames[i % 7],
+        dateLabel: current ? formatShortHeaderDate(current) : `Day ${i}`,
+        isWeekStart: current ? current.getDay() === 1 : i % 7 === 0
+      };
+    });
+  }, [job, maxFinish]);
+
+  if (loading) return <div className="p-6">Loading Gantt...</div>;
+  if (!job_id) return <div className="p-6">No job selected.</div>;
+  if (!tasks.length) return <div className="p-6">No tasks found for this job.</div>;
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <div className="min-w-[1100px]">
+
+          {/* HEADER (unchanged) */}
+
+          <div className="grid grid-cols-[320px_110px_110px_140px_1fr] gap-4 border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            <div className="sticky left-0 z-30 bg-slate-100">Task</div>
+            <div className="sticky left-[320px] z-30 bg-slate-100">Start</div>
+            <div className="sticky left-[430px] z-30 bg-slate-100">Finish</div>
+            <div className="sticky left-[540px] z-30 bg-slate-100">Status</div>
+            <div>Timeline</div>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {tasks.map((t) => {
+              const start = t.early_start ?? 0;
+              const finish = t.early_finish ?? 0;
+              const duration = Math.max(finish - start, 1);
+              const totalFloat = t.total_float ?? 0;
+
+              const left = (start / maxFinish) * 100;
+              const width = (duration / maxFinish) * 100;
+
+              const isHovered = hoveredTask === t.id;
+
+              return (
+                <div
+                  key={t.id}
+                  className="grid w-full grid-cols-[320px_110px_110px_140px_1fr] gap-4 px-4 py-3"
+                >
+                  <div className="truncate text-[13px] font-medium text-slate-900">
+                    {t.task_name}
+                  </div>
+
+                  <div className="text-[13px]">Day {start}</div>
+                  <div className="text-[13px]">Day {finish}</div>
+
+                  <div>
+                    {t.is_critical ? "Critical" : `Float ${totalFloat}`}
+                  </div>
+
+                  <div className="relative">
+                    <div className="relative h-7 w-full rounded-md bg-slate-100">
+
+                      <div
+                        onMouseEnter={() => setHoveredTask(t.id)}
+                        onMouseLeave={() => setHoveredTask(null)}
+                        className={`absolute top-0 h-7 rounded-md ${
+                          t.is_critical ? "bg-red-500" : "bg-blue-500"
+                        }`}
+                        style={{
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          minWidth: "8px"
+                        }}
+                      />
+
+                      {isHovered && (
+                        <div
+                          className="absolute z-50 -top-14 left-1/2 w-56 -translate-x-1/2 rounded-lg border bg-white p-3 text-xs shadow-lg"
+                        >
+                          <div className="font-semibold text-slate-900">
+                            {t.task_name}
+                          </div>
+
+                          <div className="mt-1 text-slate-500">
+                            Day {start} → Day {finish}
+                          </div>
+
+                          <div className="mt-1">
+                            Duration: <span className="font-semibold">{duration}</span>
+                          </div>
+
+                          <div>
+                            {t.is_critical ? (
+                              <span className="text-red-600 font-semibold">Critical Path</span>
+                            ) : (
+                              <span className="text-blue-600 font-semibold">
+                                Float: {totalFloat}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
