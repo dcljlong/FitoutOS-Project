@@ -1,7 +1,5 @@
 ﻿
-@app.get("/")
-def root():
-    return {"status": "FitoutOS backend running"}
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -49,6 +47,10 @@ security = HTTPBearer()
 # Create the main app
 app = FastAPI(title="FitoutOS API", version="1.0.0")
 
+
+@app.get("/")
+def root():
+    return {"status": "FitoutOS backend running"}
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -2465,6 +2467,10 @@ security = HTTPBearer()
 # Create the main app
 app = FastAPI(title="FitoutOS API", version="1.0.0")
 
+
+@app.get("/")
+def root():
+    return {"status": "FitoutOS backend running"}
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -6862,6 +6868,7 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
 
 
 
