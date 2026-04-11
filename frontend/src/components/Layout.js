@@ -49,7 +49,7 @@ const Layout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(user?.role));
 
@@ -209,3 +209,4 @@ const Layout = () => {
 };
 
 export default Layout;
+
