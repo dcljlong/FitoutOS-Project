@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -49,7 +49,7 @@ const Layout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(user?.role));
 
@@ -59,26 +59,23 @@ const Layout = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Mobile overlay */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={cn(
           "fixed left-0 top-0 h-full bg-card border-r border-border z-50",
           "transform transition-all duration-200 ease-in-out",
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
-          sidebarCollapsed ? "md:w-16" : "w-64"
+          sidebarCollapsed ? "md:w-14" : "w-56"
         )}
       >
-        {/* Logo */}
         <div className={cn(
-          "h-16 flex items-center border-b border-border px-4",
+          "h-16 flex items-center border-b border-border px-3",
           sidebarCollapsed && "md:justify-center md:px-2"
         )}>
           <Building2 className="h-8 w-8 text-primary flex-shrink-0" />
@@ -93,7 +90,6 @@ const Layout = () => {
           </button>
         </div>
 
-        {/* Navigation */}
         <nav className="p-2 space-y-1 overflow-y-auto h-[calc(100vh-8rem)]">
           {filteredNavItems.map((item) => (
             <NavLink
@@ -103,11 +99,12 @@ const Layout = () => {
               className={({ isActive }) => cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors",
                 "hover:bg-accent hover:text-accent-foreground",
-                isActive 
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" 
+                isActive
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
                   : "text-muted-foreground",
                 sidebarCollapsed && "md:justify-center md:px-2"
               )}
+              title={sidebarCollapsed ? item.label : undefined}
             >
               <item.icon className="h-5 w-5 flex-shrink-0" />
               {!sidebarCollapsed && <span className="font-medium">{item.label}</span>}
@@ -115,7 +112,6 @@ const Layout = () => {
           ))}
         </nav>
 
-        {/* Collapse toggle (desktop only) */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="hidden md:flex absolute bottom-4 right-0 translate-x-1/2 items-center justify-center w-6 h-6 rounded-full bg-card border border-border shadow-sm hover:bg-accent"
@@ -127,12 +123,10 @@ const Layout = () => {
         </button>
       </aside>
 
-      {/* Main content */}
       <div className={cn(
         "min-h-screen transition-all duration-200",
-        sidebarCollapsed ? "md:ml-16" : "md:ml-64"
+        sidebarCollapsed ? "md:ml-14" : "md:ml-56"
       )}>
-        {/* Top header */}
         <header className="sticky top-0 z-30 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
           <div className="flex items-center justify-between h-full px-4">
             <button
@@ -145,7 +139,6 @@ const Layout = () => {
             <div className="flex-1" />
 
             <div className="flex items-center gap-2">
-              {/* Theme toggle */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -159,7 +152,6 @@ const Layout = () => {
                 )}
               </Button>
 
-              {/* User menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center gap-2 px-2" data-testid="user-menu">
@@ -190,13 +182,11 @@ const Layout = () => {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="p-4 md:p-6 lg:p-8">
+        <main className="p-3 md:p-4 lg:p-5">
           <Outlet />
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50 md:hidden">
         <div className="flex items-center justify-around py-2">
           {filteredNavItems.slice(0, 5).map((item) => (
@@ -219,5 +209,3 @@ const Layout = () => {
 };
 
 export default Layout;
-
-
