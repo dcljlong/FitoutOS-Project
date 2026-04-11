@@ -32,16 +32,16 @@ import {
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'pm', 'worker'] },
-  { path: '/jobs', label: 'Jobs', icon: Briefcase, roles: ['admin', 'pm', 'worker'] },
-  { path: '/tasks', label: 'Tasks', icon: ListTodo, roles: ['admin', 'pm', 'worker'] },
-  { path: '/task-codes', label: 'Task Codes', icon: ClipboardList, roles: ['admin', 'pm'] },
-  { path: '/timesheets', label: 'Timesheets', icon: Clock, roles: ['admin', 'pm', 'worker'] },
-  { path: '/timesheets/approval', label: 'Approvals', icon: CheckSquare, roles: ['admin', 'pm'] },
-  { path: '/subcontractors', label: 'Subcontractors', icon: Users, roles: ['admin', 'pm'] },
-  { path: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'pm'] },
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'pm', 'project_manager', 'worker'] },
+  { path: '/jobs', label: 'Jobs', icon: Briefcase, roles: ['admin', 'pm', 'project_manager', 'worker'] },
+  { path: '/tasks', label: 'Tasks', icon: ListTodo, roles: ['admin', 'pm', 'project_manager', 'worker'] },
+  { path: '/task-codes', label: 'Task Codes', icon: ClipboardList, roles: ['admin', 'pm', 'project_manager'] },
+  { path: '/timesheets', label: 'Timesheets', icon: Clock, roles: ['admin', 'pm', 'project_manager', 'worker'] },
+  { path: '/timesheets/approval', label: 'Approvals', icon: CheckSquare, roles: ['admin', 'pm', 'project_manager'] },
+  { path: '/subcontractors', label: 'Subcontractors', icon: Users, roles: ['admin', 'pm', 'project_manager'] },
+  { path: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'pm', 'project_manager'] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-  { path: '/resource-analysis', label: 'Resource Analysis', icon: BarChart3, roles: ['admin', 'pm'] },
+  { path: '/resource-analysis', label: 'Resource Analysis', icon: BarChart3, roles: ['admin', 'pm', 'project_manager'] },
 ];
 
 const Layout = () => {
@@ -209,5 +209,6 @@ const Layout = () => {
 };
 
 export default Layout;
+
 
 
