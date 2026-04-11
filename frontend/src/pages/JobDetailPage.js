@@ -164,7 +164,7 @@ export default function JobDetailPage() {
 
   const fetchJobData = useCallback(async () => {
     try {
-      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, unmatchedRes, analysisRes] = await Promise.all([
+      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, unmatchedRes] = await Promise.all([
         api.get(`/jobs/${jobId}`),
         api.get(`/tasks?job_id=${jobId}`),
         api.get(`/jobs/${jobId}/task-codes`),
@@ -182,7 +182,7 @@ export default function JobDetailPage() {
       setDelays(delaysRes.data);
       setProgramme(programmeRes.data);
       setUnmatchedLabour(unmatchedRes.data.rows || []);
-      setAnalysis(analysisRes.data.analysis || null);
+      
     } catch (error) {
       toast.error('Failed to load job details');
     } finally {
@@ -1618,6 +1618,7 @@ export default function JobDetailPage() {
     </div>
   );
 }
+
 
 
 
