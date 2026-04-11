@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import ResourceAnalysisPage from '@/pages/ResourceAnalysisPage';
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -20,6 +20,7 @@ import SubcontractorsPage from "@/pages/SubcontractorsPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SettingsPage from "@/pages/SettingsPage";
 import GanttPage from "@/pages/GanttPage";
+import ProgrammesPage from "@/pages/ProgrammesPage";
 
 // Layout
 import Layout from "@/components/Layout";
@@ -27,7 +28,7 @@ import Layout from "@/components/Layout";
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
-  
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -35,29 +36,29 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
       </div>
     );
   }
-  
+
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  
+
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
   }
-  
+
   return children;
 };
 
 function AppRoutes() {
   const { user } = useAuth();
-  
+
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
-      
+
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        
+
         <Route path="jobs" element={<JobsPage />} />
         <Route path="jobs/new" element={
           <ProtectedRoute allowedRoles={['admin', 'pm']}>
@@ -71,34 +72,35 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="jobs/:jobId/gantt" element={<GanttPage />} />
-        
+        <Route path="jobs/:jobId/programmes" element={<ProgrammesPage />} />
+
         <Route path="tasks" element={<TasksPage />} />
-        
+
         <Route path="task-codes" element={
           <ProtectedRoute allowedRoles={['admin', 'pm']}>
             <TaskCodesPage />
           </ProtectedRoute>
         } />
-        
+
         <Route path="timesheets" element={<TimesheetsPage />} />
         <Route path="timesheets/approval" element={
           <ProtectedRoute allowedRoles={['admin', 'pm']}>
             <TimesheetApprovalPage />
           </ProtectedRoute>
         } />
-        
+
         <Route path="subcontractors" element={
           <ProtectedRoute allowedRoles={['admin', 'pm']}>
             <SubcontractorsPage />
           </ProtectedRoute>
         } />
-        
+
         <Route path="reports" element={
           <ProtectedRoute allowedRoles={['admin', 'pm']}>
             <ReportsPage />
           </ProtectedRoute>
         } />
-        
+
         <Route path="settings" element={
           <ProtectedRoute allowedRoles={['admin']}>
             <SettingsPage />
@@ -130,6 +132,3 @@ function App() {
 }
 
 export default App;
-
-
-
