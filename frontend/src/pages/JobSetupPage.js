@@ -831,7 +831,7 @@ try {
                         <p className="whitespace-pre-wrap">{analysis.job_summary}</p>
                       </div>
                     ) : (
-                      <div className="space-y-4"><p className="whitespace-pre-wrap">{analysis.job_summary}</p>
+                      <div className="space-y-4">
                         {analysis.job_summary.description && (
                           <p className="whitespace-pre-wrap">{analysis.job_summary.description}</p>
                         )}
@@ -1219,6 +1219,7 @@ try {
     </div>
   );
 }
+
 
 
 
