@@ -1157,9 +1157,9 @@ export default function JobDetailPage() {
                     {taskCodes.filter(c => c.is_active).map(code => (
                       <Badge
                         key={code.id}
-                        variant={taskForm.linked_task_codes.includes(code.code) ? "default" : "outline"}
+                        variant={taskForm.linked_task_codes.includes(code.id) ? "default" : "outline"}
                         className="cursor-pointer"
-                        onClick={() => toggleTaskCode(code.code)}
+                        onClick={() => toggleTaskCode(code.id)}
                       >
                         {code.code}
                       </Badge>
@@ -1258,9 +1258,14 @@ export default function JobDetailPage() {
                   <div>
                     <h4 className="text-sm font-medium mb-2">Linked Task Codes</h4>
                     <div className="flex flex-wrap gap-2">
-                      {selectedTask.linked_task_codes.map(code => (
-                        <Badge key={code} variant="outline">{code}</Badge>
-                      ))}
+                      {selectedTask.linked_task_codes.map(codeId => {
+                        const codeRow = taskCodes.find(c => c.id === codeId);
+                        return (
+                          <Badge key={codeId} variant="outline">
+                            {codeRow ? `${codeRow.code} - ${codeRow.name}` : codeId}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1618,6 +1623,8 @@ export default function JobDetailPage() {
     </div>
   );
 }
+
+
 
 
 
