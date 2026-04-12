@@ -192,59 +192,66 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {recentJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="rounded-lg border p-4 hover:bg-accent/40 transition-colors"
-                    data-testid={`job-${job.job_number}`}
-                  >
-                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-sm text-muted-foreground">{job.job_number}</span>
-                          <Badge variant={job.status === 'active' ? 'default' : 'secondary'}>
-                            {job.status}
-                          </Badge>
+                {recentJobs.map((job) => {
+                  const jobRouteId = job.id || job.job_id || job._id;
+
+                  return (
+                    <div
+                      key={jobRouteId || job.job_number}
+                      className="rounded-lg border p-4 hover:bg-accent/40 transition-colors"
+                      data-testid={`job-${job.job_number}`}
+                    >
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm text-muted-foreground">{job.job_number}</span>
+                            <Badge variant={job.status === 'active' ? 'default' : 'secondary'}>
+                              {job.status}
+                            </Badge>
+                          </div>
+
+                          <h3 className="font-semibold mt-1 truncate">{job.job_name}</h3>
+
+                          <div className="mt-1 text-sm text-muted-foreground space-y-1">
+                            {job.main_contractor && <div className="truncate">{job.main_contractor}</div>}
+                            {job.site_address && <div className="truncate">{job.site_address}</div>}
+                          </div>
                         </div>
 
-                        <h3 className="font-semibold mt-1 truncate">{job.job_name}</h3>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/jobs/${jobRouteId}`)}
+                            disabled={!jobRouteId}
+                          >
+                            <FolderOpen className="mr-2 h-4 w-4" />
+                            Open Job
+                          </Button>
 
-                        <div className="mt-1 text-sm text-muted-foreground space-y-1">
-                          {job.main_contractor && <div className="truncate">{job.main_contractor}</div>}
-                          {job.site_address && <div className="truncate">{job.site_address}</div>}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/jobs/${jobRouteId}/programmes`)}
+                            disabled={!jobRouteId}
+                          >
+                            📊 Programmes
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/resource-analysis/${jobRouteId}`)}
+                            disabled={!jobRouteId}
+                          >
+                            <BarChart3 className="mr-2 h-4 w-4" />
+                            Analysis
+                          </Button>
                         </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/jobs/${job.id}`)}
-                        >
-                          <FolderOpen className="mr-2 h-4 w-4" />
-                          Open Job
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/jobs/${job.id}/programmes`)}
-                        >
-                          📊 Programmes
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/resource-analysis/${job.id}`)}
-                        >
-                          <BarChart3 className="mr-2 h-4 w-4" />
-                          Analysis
-                        </Button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -345,5 +352,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-
