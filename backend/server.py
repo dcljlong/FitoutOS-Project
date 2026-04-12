@@ -183,13 +183,60 @@ def build_scope_task_allocation(scope_rows: List[Dict[str, Any]], task_rows: Lis
         and task_row.get("planned_finish")
     ]
 
+    def add_hours(target_tasks: List[Dict[str, Any]], hours: float):
+        if not target_tasks:
+            return
+        split_hours = hours / len(target_tasks)
+        for task_row in target_tasks:
+            task_id = task_row.get("id")
+            if not task_id:
+                continue
+            allocation_map[task_id] = allocation_map.get(task_id, 0.0) + split_hours
+
+    def get_tasks_by_names(names: List[str]) -> List[Dict[str, Any]]:
+        name_set = {n.strip().lower() for n in names if n}
+        return [
+            task_row for task_row in eligible_tasks
+            if (task_row.get("task_name") or "").strip().lower() in name_set
+        ]
+
     for scope_row in scope_rows:
         hours = get_scope_hours_value(scope_row)
         if hours is None or hours <= 0:
             continue
 
-        scope_item_name = scope_row.get("item")
+        scope_item_name = scope_row.get("item") or ""
         if not scope_item_name:
+            continue
+
+        source_sheet = (scope_row.get("source_sheet") or "").strip()
+        scope_text = normalize_text(scope_item_name)
+
+        explicit_names: List[str] = []
+
+        if source_sheet == "Partitions":
+            explicit_names = ["Steel stud framing"]
+        elif source_sheet == "Gib Linings":
+            explicit_names = ["Wall linings installation"]
+        elif source_sheet == "Stopping":
+            explicit_names = ["Stopping and finishing"]
+        elif source_sheet == "Insulation":
+            explicit_names = ["Install insulation"]
+        elif source_sheet == "Potters Aluminium and Glazing":
+            explicit_names = ["Internal glazing / aluminium works"]
+        elif source_sheet == "Featurecraft":
+            explicit_names = ["Feature works and bulkheads"]
+        elif source_sheet == "Potters Rigitone Matrix":
+            explicit_names = ["Acoustic systems install"]
+        elif source_sheet == "Suspended Ceilings":
+            if "tile" in scope_text or "hatch" in scope_text:
+                explicit_names = ["Install ceiling tiles and finishes"]
+            else:
+                explicit_names = ["Ceiling framing and grid"]
+
+        explicit_tasks = get_tasks_by_names(explicit_names)
+        if explicit_tasks:
+            add_hours(explicit_tasks, hours)
             continue
 
         matching_tasks = [
@@ -200,16 +247,9 @@ def build_scope_task_allocation(scope_rows: List[Dict[str, Any]], task_rows: Lis
         if not matching_tasks:
             continue
 
-        split_hours = hours / len(matching_tasks)
-
-        for task_row in matching_tasks:
-            task_id = task_row.get("id")
-            if not task_id:
-                continue
-            allocation_map[task_id] = allocation_map.get(task_id, 0.0) + split_hours
+        add_hours(matching_tasks, hours)
 
     return allocation_map
-
 
 def get_nz_public_holidays(year: int, region: str = NZ_REGION):
     region = (region or "auckland").strip().lower()
@@ -2591,44 +2631,6 @@ def task_matches_scope(scope_item_name: str, task_name: str) -> bool:
             return True
 
     return False
-
-
-def build_scope_task_allocation(scope_rows: List[Dict[str, Any]], task_rows: List[Dict[str, Any]]) -> Dict[str, float]:
-    allocation_map: Dict[str, float] = {}
-
-    eligible_tasks = [
-        task_row for task_row in task_rows
-        if task_row.get("is_internal", True)
-        and task_row.get("planned_start")
-        and task_row.get("planned_finish")
-    ]
-
-    for scope_row in scope_rows:
-        hours = get_scope_hours_value(scope_row)
-        if hours is None or hours <= 0:
-            continue
-
-        scope_item_name = scope_row.get("item")
-        if not scope_item_name:
-            continue
-
-        matching_tasks = [
-            task_row for task_row in eligible_tasks
-            if task_matches_scope(scope_item_name, task_row.get("task_name", ""))
-        ]
-
-        if not matching_tasks:
-            continue
-
-        split_hours = hours / len(matching_tasks)
-
-        for task_row in matching_tasks:
-            task_id = task_row.get("id")
-            if not task_id:
-                continue
-            allocation_map[task_id] = allocation_map.get(task_id, 0.0) + split_hours
-
-    return allocation_map
 
 
 def get_nz_public_holidays(year: int, region: str = NZ_REGION):
@@ -5265,100 +5267,101 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
             return "aluminium"
 
         return "other"
+    has_task_hours = any((t.get("quoted_hours") or 0) not in [None, "", 0] for t in tasks)
 
-    for t in tasks:
-        t["quoted_hours"] = 0
+    if not has_task_hours:
+        for t in tasks:
+            t["quoted_hours"] = 0
 
-    for scope in scope_rows:
-        hours = scope.get("approved_hours")
-        if hours in [None, ""]:
-            hours = scope.get("quoted_hours")
-        if hours in [None, ""]:
-            continue
-
-        try:
-            hours = float(hours)
-        except Exception:
-            continue
-
-        scope_text = norm(scope.get("item"))
-        scope_family = detect_family(scope_text)
-
-        exact_matches = []
-        preferred_matches = []
-        family_matches = []
-
-        for task in tasks:
-            if not task.get("planned_start") or not task.get("planned_finish"):
+        for scope in scope_rows:
+            hours = scope.get("approved_hours")
+            if hours in [None, ""]:
+                hours = scope.get("quoted_hours")
+            if hours in [None, ""]:
                 continue
 
-            task_text = norm(task.get("task_name"))
-            task_family = detect_family(task_text)
-
-            if scope_text and scope_text in task_text:
-                exact_matches.append(task)
+            try:
+                hours = float(hours)
+            except Exception:
                 continue
 
-            if "between steel purlins" in scope_text and "between steel purlins" in task_text:
-                preferred_matches.append(task)
+            scope_text = norm(scope.get("item"))
+            scope_family = detect_family(scope_text)
+
+            exact_matches = []
+            preferred_matches = []
+            family_matches = []
+
+            for task in tasks:
+                if not task.get("planned_start") or not task.get("planned_finish"):
+                    continue
+
+                task_text = norm(task.get("task_name"))
+                task_family = detect_family(task_text)
+
+                if scope_text and scope_text in task_text:
+                    exact_matches.append(task)
+                    continue
+
+                if "between steel purlins" in scope_text and "between steel purlins" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if "it walls and partitions" in scope_text and "it walls and partitions" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if task_family == scope_family and "wall linings" in scope_text and "toilet" in scope_text and "toilet walls and ceilings" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if task_family == scope_family and "wall linings" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if task_family == scope_family and "stopping" in scope_text and "toilet" in scope_text and "toilet walls and ceilings" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if task_family == scope_family and "stopping" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if "ceiling framing" in scope_text and "toilet" in scope_text and "ceiling framing to toilets" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if "insulation" in scope_text and "insulation to walls" in task_text:
+                    preferred_matches.append(task)
+                    continue
+
+                if task_family == scope_family:
+                    family_matches.append(task)
+
+            if exact_matches:
+                split = hours / len(exact_matches)
+
+                for m in exact_matches:
+                    current = m.get("quoted_hours") or 0
+                    m["quoted_hours"] = round(float(current) + float(split), 2)
+
                 continue
 
-            if "it walls and partitions" in scope_text and "it walls and partitions" in task_text:
-                preferred_matches.append(task)
+            if preferred_matches:
+                split = hours / len(preferred_matches)
+
+                for m in preferred_matches:
+                    current = m.get("quoted_hours") or 0
+                    m["quoted_hours"] = round(float(current) + float(split), 2)
+
                 continue
 
-            if task_family == scope_family and "wall linings" in scope_text and "toilet" in scope_text and "toilet walls and ceilings" in task_text:
-                preferred_matches.append(task)
-                continue
+            if family_matches:
+                split = hours / len(family_matches)
 
-            if task_family == scope_family and "wall linings" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
-                preferred_matches.append(task)
-                continue
-
-            if task_family == scope_family and "stopping" in scope_text and "toilet" in scope_text and "toilet walls and ceilings" in task_text:
-                preferred_matches.append(task)
-                continue
-
-            if task_family == scope_family and "stopping" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
-                preferred_matches.append(task)
-                continue
-
-            if "ceiling framing" in scope_text and "toilet" in scope_text and "ceiling framing to toilets" in task_text:
-                preferred_matches.append(task)
-                continue
-
-            if "insulation" in scope_text and "insulation to walls" in task_text:
-                preferred_matches.append(task)
-                continue
-
-            if task_family == scope_family:
-                family_matches.append(task)
-
-        if exact_matches:
-            split = hours / len(exact_matches)
-
-            for m in exact_matches:
-                current = m.get("quoted_hours") or 0
-                m["quoted_hours"] = round(float(current) + float(split), 2)
-
-            continue
-
-        if preferred_matches:
-            split = hours / len(preferred_matches)
-
-            for m in preferred_matches:
-                current = m.get("quoted_hours") or 0
-                m["quoted_hours"] = round(float(current) + float(split), 2)
-
-            continue
-
-        if family_matches:
-            split = hours / len(family_matches)
-
-            for m in family_matches:
-                current = m.get("quoted_hours") or 0
-                m["quoted_hours"] = round(float(current) + float(split), 2)
-
+                for m in family_matches:
+                    current = m.get("quoted_hours") or 0
+                    m["quoted_hours"] = round(float(current) + float(split), 2)
     analysis_rows = []
     total_quoted_hours = 0.0
     total_actual_hours = 0.0
@@ -6868,6 +6871,7 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
 
 
 

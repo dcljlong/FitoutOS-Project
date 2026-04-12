@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -274,7 +274,7 @@ export default function ResourceAnalysisPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Timeline Days</p>
+            <p className="text-sm text-muted-foreground">Working Days (5-day week)</p>
             <p className="text-2xl font-bold">{summary.days ?? "-"}</p>
           </CardContent>
         </Card>
@@ -437,4 +437,5 @@ export default function ResourceAnalysisPage() {
     </div>
   );
 }
+
 
