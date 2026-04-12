@@ -37,10 +37,30 @@ const formatShortDate = (value) => {
   return d.toLocaleDateString("en-NZ", { day: "2-digit", month: "short" });
 };
 
+const formatDateRange = (start, finish) => {
+  if (!start && !finish) return "-";
+  if (start && finish && start === finish) return formatShortDate(start);
+  return `${formatShortDate(start)} → ${formatShortDate(finish)}`;
+};
+
+const formatRecoveryStrategy = (value) => {
+  switch ((value || "").toUpperCase()) {
+    case "KEEP_CURRENT_DATES":
+      return "Keep current dates";
+    case "USE_SATURDAY":
+      return "Use Saturday";
+    case "ADD_CREW_OR_EXTEND_DATES":
+      return "Add crew or extend dates";
+    default:
+      return value || "-";
+  }
+};
+
 const statusClass = (status) => {
   switch ((status || "").toUpperCase()) {
     case "ON_TRACK":
       return "bg-green-100 text-green-800 border border-green-200";
+    case "SATURDAY_REQUIRED":
     case "OVERTIME_REQUIRED":
       return "bg-blue-100 text-blue-800 border border-blue-200";
     case "OVERCREW":
@@ -57,6 +77,7 @@ export default function ResourceAnalysisPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [timelinePayload, setTimelinePayload] = useState(null);
+  const [analysisPayload, setAnalysisPayload] = useState(null);
   const [errorState, setErrorState] = useState(null);
 
   useEffect(() => {
@@ -64,6 +85,7 @@ export default function ResourceAnalysisPage() {
       if (!jobId) {
         setErrorState("missing-job-id");
         setTimelinePayload(null);
+        setAnalysisPayload(null);
         setLoading(false);
         return;
       }
@@ -72,8 +94,13 @@ export default function ResourceAnalysisPage() {
       setErrorState(null);
 
       try {
-        const res = await api.get(`/jobs/${jobId}/resource-load-timeline`);
-        setTimelinePayload(res.data || null);
+        const [timelineRes, analysisRes] = await Promise.all([
+          api.get(`/jobs/${jobId}/resource-load-timeline`),
+          api.get(`/jobs/${jobId}/resource-analysis`),
+        ]);
+
+        setTimelinePayload(timelineRes.data || null);
+        setAnalysisPayload(analysisRes.data || null);
       } catch (error) {
         console.error(error);
 
@@ -83,10 +110,11 @@ export default function ResourceAnalysisPage() {
           setErrorState("invalid-job");
         } else {
           setErrorState("load-failed");
-          toast.error("Failed to load resource timeline");
+          toast.error("Failed to load resource analysis");
         }
 
         setTimelinePayload(null);
+        setAnalysisPayload(null);
       } finally {
         setLoading(false);
       }
@@ -151,7 +179,7 @@ export default function ResourceAnalysisPage() {
     );
   }
 
-  if (errorState === "load-failed" || !timelinePayload) {
+  if (errorState === "load-failed" || !timelinePayload || !analysisPayload) {
     return (
       <div className="space-y-6" data-testid="resource-analysis-page">
         <div className="flex items-center justify-between gap-3">
@@ -175,7 +203,7 @@ export default function ResourceAnalysisPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">No Data</CardTitle>
-            <CardDescription>No resource timeline data available for this job.</CardDescription>
+            <CardDescription>No resource analysis data available for this job.</CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -184,7 +212,26 @@ export default function ResourceAnalysisPage() {
 
   const summary = timelinePayload.summary || {};
   const timeline = timelinePayload.timeline || [];
+  const analysisSummary = analysisPayload.summary || {};
   const hasNoTimeline = timeline.length === 0;
+
+  const chartData = timeline.map((row) => ({
+    ...row,
+    shortDate: formatShortDate(row.date),
+  }));
+
+  const taskRows = [...(analysisPayload.tasks || [])].sort((a, b) => {
+    const aGap = Number(a.duration_gap_days_at_standard_crew ?? -1);
+    const bGap = Number(b.duration_gap_days_at_standard_crew ?? -1);
+
+    if (bGap !== aGap) {
+      return bGap - aGap;
+    }
+
+    const aCrew = Number(a.required_crew_standard || 0);
+    const bCrew = Number(b.required_crew_standard || 0);
+    return bCrew - aCrew;
+  });
 
   if (hasNoTimeline) {
     return (
@@ -224,11 +271,6 @@ export default function ResourceAnalysisPage() {
     );
   }
 
-  const chartData = timeline.map((row) => ({
-    ...row,
-    shortDate: formatShortDate(row.date),
-  }));
-
   const peakCrewRequired = timeline.reduce((max, row) => {
     const value = Number(row.crew_required || 0);
     return value > max ? value : max;
@@ -243,11 +285,13 @@ export default function ResourceAnalysisPage() {
     return sum + Number(row.crew_over || 0);
   }, 0);
 
-  const overallStatus = totalCrewOver > 0
-    ? "OVERCREW"
-    : summary.total_overload_hours > 0
-      ? "OVERALLOCATED"
-      : "ON_TRACK";
+  const overallStatus = analysisSummary.overall_status || (
+    totalCrewOver > 0
+      ? "OVERCREW"
+      : summary.total_overload_hours > 0
+        ? "OVERALLOCATED"
+        : "ON_TRACK"
+  );
 
   return (
     <div className="space-y-6" data-testid="resource-analysis-page">
@@ -308,6 +352,43 @@ export default function ResourceAnalysisPage() {
         </Card>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Standard Crew</p>
+            <p className="text-2xl font-bold">{formatNumber(analysisSummary.standard_crew, 1)}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Tasks Overallocated</p>
+            <p className="text-2xl font-bold">{analysisSummary.tasks_overallocated ?? "-"}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Saturday Required Tasks</p>
+            <p className="text-2xl font-bold">{analysisSummary.tasks_requiring_saturday ?? "-"}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Max Crew Needed</p>
+            <p className="text-2xl font-bold">{formatNumber(analysisSummary.max_required_crew_standard, 2)}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Max Extra Crew</p>
+            <p className="text-2xl font-bold">{formatNumber(analysisSummary.max_extra_crew_standard, 2)}</p>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader>
@@ -328,13 +409,34 @@ export default function ResourceAnalysisPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle className="text-lg">Recovery Summary</CardTitle>
+            <CardDescription>Programme pressure based on quoted hours and dated window</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-muted-foreground">Approved Scope Hours</span>
+              <span className="font-semibold">{formatHours(analysisSummary.total_approved_scope_hours)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-muted-foreground">Available Hours</span>
+              <span className="font-semibold">{formatHours(analysisSummary.total_available_hours_standard)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-muted-foreground">Available + Saturday</span>
+              <span className="font-semibold">{formatHours(analysisSummary.total_available_hours_with_saturday)}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-lg">Capacity Rule</CardTitle>
             <CardDescription>Interpretation of labour and crew constraints</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>OVERALLOCATED = required hours exceed available hours.</p>
-            <p>OVERCREW = required crew exceeds job crew limit.</p>
-            <p>ON_TRACK = hours and crew are both within limits.</p>
+            <p>SATURDAY_REQUIRED = current dates only work with Saturday backup.</p>
+            <p>Recommended recovery crew is the rounded crew needed to hold the current dates.</p>
           </CardContent>
         </Card>
       </div>
@@ -359,9 +461,9 @@ export default function ResourceAnalysisPage() {
             </div>
           </div>
 
-          <div className="h-[380px] w-full">
+          <div className="h-[260px] w-full max-w-[1100px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
+              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 24 }} barCategoryGap="35%">
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="shortDate" />
                 <YAxis />
@@ -378,8 +480,8 @@ export default function ResourceAnalysisPage() {
                   }}
                 />
                 <ReferenceLine y={0} />
-                <Bar dataKey="hours_available" name="hours_available" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="hours_required" name="hours_required" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="hours_available" name="hours_available" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                <Bar dataKey="hours_required" name="hours_required" radius={[4, 4, 0, 0]} maxBarSize={48} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -429,6 +531,67 @@ export default function ResourceAnalysisPage() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Task Recovery Analysis</CardTitle>
+          <CardDescription>
+            Recovery pressure by task based on quoted hours, current dates, and standard crew
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="data-table w-full">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Window</th>
+                  <th className="text-right">Quoted</th>
+                  <th className="text-right">Std Days</th>
+                  <th className="text-right">Crew Req</th>
+                  <th className="text-right">Crew Req + Sat</th>
+                  <th className="text-right">Days @ Std Crew</th>
+                  <th className="text-right">Gap</th>
+                  <th className="text-right">Extra Crew</th>
+                  <th className="text-right">Recovery Crew</th>
+                  <th>Recovery</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taskRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="text-center text-muted-foreground py-6">
+                      No task recovery data available.
+                    </td>
+                  </tr>
+                ) : (
+                  taskRows.map((row) => (
+                    <tr key={row.task_id}>
+                      <td className="font-medium">{row.task_name || "-"}</td>
+                      <td>{formatDateRange(row.planned_start, row.planned_finish)}</td>
+                      <td className="text-right">{formatHours(row.quoted_hours)}</td>
+                      <td className="text-right">{formatNumber(row.available_days_standard, 0)}</td>
+                      <td className="text-right">{formatNumber(row.required_crew_standard, 2)}</td>
+                      <td className="text-right">{formatNumber(row.required_crew_with_saturday, 2)}</td>
+                      <td className="text-right">{formatNumber(row.duration_days_at_standard_crew, 0)}</td>
+                      <td className="text-right">{formatNumber(row.duration_gap_days_at_standard_crew, 0)}</td>
+                      <td className="text-right">{formatNumber(row.extra_crew_needed_standard, 2)}</td>
+                      <td className="text-right">{formatNumber(row.recommended_recovery_crew, 1)}</td>
+                      <td>{formatRecoveryStrategy(row.recovery_strategy)}</td>
+                      <td>
+                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold ${statusClass(row.programme_feasible)}`}>
+                          {row.programme_feasible || "-"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

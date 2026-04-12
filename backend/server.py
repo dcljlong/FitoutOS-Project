@@ -5244,15 +5244,14 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
         except Exception:
             pass
 
-    def norm(text):
-        if not text:
+    def norm(value):
+        if not value:
             return ""
-        text = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
-        return " ".join(text.split())
+        value = "".join(ch.lower() if ch.isalnum() else " " for ch in value)
+        return " ".join(value.split())
 
-    def detect_family(text):
-        t = norm(text)
-
+    def detect_family(value):
+        t = norm(value)
         if any(word in t for word in ["insulation", "insulate", "greenstuf", "autex", "batt", "batts"]):
             return "insulation"
         if any(word in t for word in ["stopping", "stop", "skim", "finish", "finishing"]):
@@ -5263,15 +5262,48 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
             return "ceilings"
         if any(word in t for word in ["framing", "frame", "stud", "studs", "purlin", "purlins", "partition", "partitions"]):
             return "framing"
-        if any(word in t for word in ["aluminium", "aluminum", "glazing", "glass"]):
+        if any(word in t for word in ["feature", "bulkhead", "bulkheads"]):
+            return "feature"
+        if any(word in t for word in ["acoustic", "acoustics"]):
+            return "acoustic"
+        if any(word in t for word in ["aluminium", "aluminum", "glazing", "glazed", "glass"]):
             return "aluminium"
-
         return "other"
+
+    def calculate_duration_days_for_crew_local(quoted_hours, crew_size, hours_per_day):
+        try:
+            qh = float(quoted_hours or 0)
+            crew = float(crew_size or 0)
+            hpd = float(hours_per_day or 0)
+            if qh <= 0 or crew <= 0 or hpd <= 0:
+                return None
+            raw_days = qh / (crew * hpd)
+            whole_days = int(raw_days)
+            if abs(raw_days - whole_days) < 1e-9:
+                return max(1, whole_days)
+            return max(1, whole_days + 1)
+        except Exception:
+            return None
+
+    def round_up_crew_local(value, step: float = 0.5):
+        try:
+            v = float(value or 0)
+            s = float(step or 0.5)
+            if v <= 0 or s <= 0:
+                return None
+            raw_units = v / s
+            whole_units = int(raw_units)
+            if abs(raw_units - whole_units) < 1e-9:
+                return round(whole_units * s, 2)
+            return round((whole_units + 1) * s, 2)
+        except Exception:
+            return None
+
     has_task_hours = any((t.get("quoted_hours") or 0) not in [None, "", 0] for t in tasks)
 
     if not has_task_hours:
-        for t in tasks:
-            t["quoted_hours"] = 0
+        for task in tasks:
+            task["quoted_hours"] = 0
 
         for scope in scope_rows:
             hours = scope.get("approved_hours")
@@ -5315,61 +5347,48 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
                     preferred_matches.append(task)
                     continue
 
-                if task_family == scope_family and "wall linings" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
-                    preferred_matches.append(task)
-                    continue
-
-                if task_family == scope_family and "stopping" in scope_text and "toilet" in scope_text and "toilet walls and ceilings" in task_text:
-                    preferred_matches.append(task)
-                    continue
-
-                if task_family == scope_family and "stopping" in scope_text and "it walls" in scope_text and "exterior walls" in scope_text and "it and exterior walls" in task_text:
-                    preferred_matches.append(task)
-                    continue
-
-                if "ceiling framing" in scope_text and "toilet" in scope_text and "ceiling framing to toilets" in task_text:
-                    preferred_matches.append(task)
-                    continue
-
-                if "insulation" in scope_text and "insulation to walls" in task_text:
-                    preferred_matches.append(task)
-                    continue
-
                 if task_family == scope_family:
                     family_matches.append(task)
 
             if exact_matches:
                 split = hours / len(exact_matches)
-
-                for m in exact_matches:
-                    current = m.get("quoted_hours") or 0
-                    m["quoted_hours"] = round(float(current) + float(split), 2)
-
+                for match in exact_matches:
+                    current = match.get("quoted_hours") or 0
+                    match["quoted_hours"] = round(float(current) + float(split), 2)
                 continue
 
             if preferred_matches:
                 split = hours / len(preferred_matches)
-
-                for m in preferred_matches:
-                    current = m.get("quoted_hours") or 0
-                    m["quoted_hours"] = round(float(current) + float(split), 2)
-
+                for match in preferred_matches:
+                    current = match.get("quoted_hours") or 0
+                    match["quoted_hours"] = round(float(current) + float(split), 2)
                 continue
 
             if family_matches:
                 split = hours / len(family_matches)
+                for match in family_matches:
+                    current = match.get("quoted_hours") or 0
+                    match["quoted_hours"] = round(float(current) + float(split), 2)
 
-                for m in family_matches:
-                    current = m.get("quoted_hours") or 0
-                    m["quoted_hours"] = round(float(current) + float(split), 2)
     analysis_rows = []
     total_quoted_hours = 0.0
     total_actual_hours = 0.0
     total_standard_hours = 0.0
     total_saturday_hours = 0.0
-    
-    # Get job settings for Saturday/overtime allowance
-    allow_saturday = job.get("allow_saturday", False)
+
+    standard_crew = None
+    try:
+        if job.get("standard_crew") not in [None, ""]:
+            standard_crew = float(job.get("standard_crew"))
+    except Exception:
+        standard_crew = None
+
+    tasks_requiring_saturday = 0
+    tasks_overallocated = 0
+    max_required_crew_standard = 0.0
+    max_required_crew_with_saturday = 0.0
+    max_extra_crew_standard = 0.0
+    max_extra_crew_with_saturday = 0.0
 
     for task in tasks:
         planned_start = task.get("planned_start")
@@ -5380,6 +5399,16 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
         saturday_window = {"days": 0, "hours": 0, "holiday_days": 0}
         required_crew_standard = None
         required_crew_with_saturday = None
+        average_hours_per_day_standard = None
+        average_hours_per_day_with_saturday = None
+        duration_days_at_standard_crew = None
+        duration_gap_days_at_standard_crew = None
+        duration_days_at_required_crew_standard = None
+        duration_days_at_required_crew_with_saturday = None
+        extra_crew_needed_standard = None
+        extra_crew_needed_with_saturday = None
+        recommended_recovery_crew = None
+        recovery_strategy = None
         requires_saturday = False
         programme_feasible = None
 
@@ -5388,11 +5417,46 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
                 start_dt = datetime.fromisoformat(planned_start)
                 finish_dt = datetime.fromisoformat(planned_finish)
 
-                standard_window = calculate_work_window_hours(start_dt, finish_dt, allow_saturday=allow_saturday)
+                standard_window = calculate_work_window_hours(start_dt, finish_dt, allow_saturday=False)
                 saturday_window = calculate_work_window_hours(start_dt, finish_dt, allow_saturday=True)
 
                 required_crew_standard = calculate_required_crew(quoted_hours, standard_window["hours"])
                 required_crew_with_saturday = calculate_required_crew(quoted_hours, saturday_window["hours"])
+
+                if standard_window["days"] > 0 and standard_window["hours"] > 0:
+                    average_hours_per_day_standard = round(standard_window["hours"] / standard_window["days"], 2)
+
+                if saturday_window["days"] > 0 and saturday_window["hours"] > 0:
+                    average_hours_per_day_with_saturday = round(saturday_window["hours"] / saturday_window["days"], 2)
+
+                if standard_crew and average_hours_per_day_standard:
+                    duration_days_at_standard_crew = calculate_duration_days_for_crew_local(
+                        quoted_hours,
+                        standard_crew,
+                        average_hours_per_day_standard
+                    )
+                    if duration_days_at_standard_crew is not None:
+                        duration_gap_days_at_standard_crew = duration_days_at_standard_crew - standard_window["days"]
+
+                if required_crew_standard and average_hours_per_day_standard:
+                    duration_days_at_required_crew_standard = calculate_duration_days_for_crew_local(
+                        quoted_hours,
+                        required_crew_standard,
+                        average_hours_per_day_standard
+                    )
+
+                if required_crew_with_saturday and average_hours_per_day_with_saturday:
+                    duration_days_at_required_crew_with_saturday = calculate_duration_days_for_crew_local(
+                        quoted_hours,
+                        required_crew_with_saturday,
+                        average_hours_per_day_with_saturday
+                    )
+
+                if standard_crew and required_crew_standard is not None:
+                    extra_crew_needed_standard = round(max(0, required_crew_standard - standard_crew), 2)
+
+                if standard_crew and required_crew_with_saturday is not None:
+                    extra_crew_needed_with_saturday = round(max(0, required_crew_with_saturday - standard_crew), 2)
 
                 if quoted_hours is not None:
                     try:
@@ -5400,12 +5464,18 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
                         if qh > 0:
                             if standard_window["hours"] >= qh:
                                 programme_feasible = "ON_TRACK"
+                                recommended_recovery_crew = round_up_crew_local(required_crew_standard)
+                                recovery_strategy = "KEEP_CURRENT_DATES"
                             elif saturday_window["hours"] >= qh:
                                 programme_feasible = "SATURDAY_REQUIRED"
                                 requires_saturday = True
+                                recommended_recovery_crew = round_up_crew_local(required_crew_with_saturday)
+                                recovery_strategy = "USE_SATURDAY"
                             else:
                                 programme_feasible = "OVERALLOCATED"
                                 requires_saturday = True
+                                recommended_recovery_crew = round_up_crew_local(required_crew_standard)
+                                recovery_strategy = "ADD_CREW_OR_EXTEND_DATES"
                     except Exception:
                         pass
             except Exception:
@@ -5420,6 +5490,23 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
         total_standard_hours += float(standard_window["hours"] or 0)
         total_saturday_hours += float(saturday_window["hours"] or 0)
 
+        if programme_feasible == "SATURDAY_REQUIRED":
+            tasks_requiring_saturday += 1
+        elif programme_feasible == "OVERALLOCATED":
+            tasks_overallocated += 1
+
+        if required_crew_standard is not None:
+            max_required_crew_standard = max(max_required_crew_standard, float(required_crew_standard))
+
+        if required_crew_with_saturday is not None:
+            max_required_crew_with_saturday = max(max_required_crew_with_saturday, float(required_crew_with_saturday))
+
+        if extra_crew_needed_standard is not None:
+            max_extra_crew_standard = max(max_extra_crew_standard, float(extra_crew_needed_standard))
+
+        if extra_crew_needed_with_saturday is not None:
+            max_extra_crew_with_saturday = max(max_extra_crew_with_saturday, float(extra_crew_needed_with_saturday))
+
         analysis_rows.append({
             "task_id": task.get("id"),
             "task_name": task.get("task_name"),
@@ -5428,7 +5515,7 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
             "quoted_hours": quoted_hours,
             "actual_hours": task.get("actual_hours", 0),
             "hours_variance": (task.get("actual_hours", 0) - (quoted_hours or 0)) if quoted_hours else None,
-            "percent_hours_used": round((task.get("actual_hours", 0) / quoted_hours) * 100,1) if quoted_hours else None,
+            "percent_hours_used": round((task.get("actual_hours", 0) / quoted_hours) * 100, 1) if quoted_hours else None,
             "available_days_standard": standard_window["days"],
             "available_hours_standard": standard_window["hours"],
             "available_days_with_saturday": saturday_window["days"],
@@ -5436,6 +5523,16 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
             "holiday_days": standard_window["holiday_days"],
             "required_crew_standard": required_crew_standard,
             "required_crew_with_saturday": required_crew_with_saturday,
+            "average_hours_per_day_standard": average_hours_per_day_standard,
+            "average_hours_per_day_with_saturday": average_hours_per_day_with_saturday,
+            "duration_days_at_standard_crew": duration_days_at_standard_crew,
+            "duration_gap_days_at_standard_crew": duration_gap_days_at_standard_crew,
+            "duration_days_at_required_crew_standard": duration_days_at_required_crew_standard,
+            "duration_days_at_required_crew_with_saturday": duration_days_at_required_crew_with_saturday,
+            "extra_crew_needed_standard": extra_crew_needed_standard,
+            "extra_crew_needed_with_saturday": extra_crew_needed_with_saturday,
+            "recommended_recovery_crew": recommended_recovery_crew,
+            "recovery_strategy": recovery_strategy,
             "requires_saturday": requires_saturday,
             "programme_feasible": programme_feasible
         })
@@ -5471,6 +5568,13 @@ async def get_job_resource_analysis(job_id: str, user: dict = Depends(get_curren
             "baseline_hours_used": round(baseline_hours, 2),
             "total_available_hours_standard": round(total_standard_hours, 2),
             "total_available_hours_with_saturday": round(total_saturday_hours, 2),
+            "standard_crew": standard_crew,
+            "tasks_requiring_saturday": tasks_requiring_saturday,
+            "tasks_overallocated": tasks_overallocated,
+            "max_required_crew_standard": round(max_required_crew_standard, 2),
+            "max_required_crew_with_saturday": round(max_required_crew_with_saturday, 2),
+            "max_extra_crew_standard": round(max_extra_crew_standard, 2),
+            "max_extra_crew_with_saturday": round(max_extra_crew_with_saturday, 2),
             "overall_status": overall_status
         },
         "tasks": analysis_rows
