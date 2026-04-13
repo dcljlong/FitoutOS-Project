@@ -215,7 +215,7 @@ export default function GanttPage() {
           <Link to={`/jobs/${jobId}`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Job
+              Previous
             </Button>
           </Link>
           <div>
@@ -487,6 +487,7 @@ export default function GanttPage() {
     </div>
   );
 }
+
 
 
 

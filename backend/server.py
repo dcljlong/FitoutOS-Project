@@ -522,6 +522,7 @@ class TaskCreate(BaseModel):
     blockers: Optional[str] = None
     notes: Optional[str] = None
     quoted_hours: Optional[float] = None
+    actual_hours: Optional[float] = 0
     percent_complete: int = 0
     locked: bool = False
     # New fields for crew/resource
@@ -1236,7 +1237,7 @@ async def create_task(task_data: TaskCreate, user: dict = Depends(require_roles(
     task = {
         "id": task_id,
         **task_data.model_dump(),
-        "actual_hours": 0,
+        "actual_hours": float(task_data.actual_hours or 0),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user["id"]
     }

@@ -120,6 +120,7 @@ export default function JobDetailPage() {
     linked_task_codes: [],
     planned_start: '',
     planned_finish: '',
+      actual_start: '',
     duration_days: '',
     owner_party: '',
     is_internal: true,
@@ -128,6 +129,8 @@ export default function JobDetailPage() {
     status: 'planned',
     notes: '',
     quoted_hours: '',
+      actual_hours: '',
+      percent_complete: '0',
   });
 
   // Task detail sheet state
@@ -235,6 +238,7 @@ export default function JobDetailPage() {
       linked_task_codes: [],
       planned_start: '',
       planned_finish: '',
+      actual_start: '',
       duration_days: '',
       owner_party: '',
       is_internal: true,
@@ -243,6 +247,8 @@ export default function JobDetailPage() {
       status: 'planned',
       notes: '',
       quoted_hours: '',
+      actual_hours: '',
+      percent_complete: '0',
     });
     setEditingTask(null);
   };
@@ -256,6 +262,7 @@ export default function JobDetailPage() {
         linked_task_codes: task.linked_task_codes || [],
         planned_start: task.planned_start || '',
         planned_finish: task.planned_finish || '',
+          actual_start: task.actual_start || '',
         duration_days: task.duration_days?.toString() || '',
         owner_party: task.owner_party || '',
         is_internal: task.is_internal,
@@ -264,6 +271,8 @@ export default function JobDetailPage() {
         status: task.status,
         notes: task.notes || '',
         quoted_hours: task.quoted_hours?.toString() || '',
+          actual_hours: task.actual_hours?.toString() || '',
+          percent_complete: task.percent_complete?.toString() || '0',
       });
     } else {
       resetTaskForm();
@@ -282,6 +291,7 @@ export default function JobDetailPage() {
       linked_task_codes: taskForm.linked_task_codes,
       planned_start: taskForm.planned_start || null,
       planned_finish: taskForm.planned_finish || null,
+      actual_start: taskForm.actual_start || null,
       duration_days: taskForm.duration_days ? parseInt(taskForm.duration_days) : null,
       owner_party: taskForm.owner_party || null,
       is_internal: taskForm.is_internal,
@@ -290,6 +300,8 @@ export default function JobDetailPage() {
       status: taskForm.status,
       notes: taskForm.notes || null,
       quoted_hours: taskForm.quoted_hours ? parseFloat(taskForm.quoted_hours) : null,
+      actual_hours: taskForm.actual_hours ? parseFloat(taskForm.actual_hours) : 0,
+      percent_complete: taskForm.percent_complete ? parseInt(taskForm.percent_complete) : 0,
     };
 
     try {
@@ -425,7 +437,7 @@ export default function JobDetailPage() {
         <Link to="/jobs" className="mt-4 inline-block">
           <Button variant="outline">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Jobs
+            Previous
           </Button>
         </Link>
       </div>
@@ -446,7 +458,7 @@ export default function JobDetailPage() {
       <div className="flex flex-col gap-4">
         <Link to="/jobs" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Jobs
+          Previous
         </Link>
         
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -491,10 +503,10 @@ export default function JobDetailPage() {
       </div>
 
       {/* Job Info Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {job.main_contractor && (
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <Building2 className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -508,7 +520,7 @@ export default function JobDetailPage() {
         
         {job.site_address && (
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <MapPin className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -522,7 +534,7 @@ export default function JobDetailPage() {
         
         {job.planned_start && (
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <Calendar className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -536,7 +548,7 @@ export default function JobDetailPage() {
         
         {job.planned_finish && (
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <Calendar className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -550,58 +562,56 @@ export default function JobDetailPage() {
       </div>
 
       {/* Progress Overview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Unmatched Labour</CardTitle>
-          <CardDescription>Imported labour not yet linked to a task</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="text-center p-4 rounded-lg bg-amber-500/10">
-              <p className="font-data text-2xl font-bold text-amber-600">{unmatchedLabourCount}</p>
-              <p className="text-sm text-muted-foreground">Unmatched Rows</p>
+      {(unmatchedLabourCount > 0 || unmatchedLabourHours > 0) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Unmatched Labour</CardTitle>
+            <CardDescription>Imported labour not yet linked to a task</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="text-center p-3 rounded-lg bg-amber-500/10">
+                <p className="font-data text-xl font-bold text-amber-600">{unmatchedLabourCount}</p>
+                <p className="text-xs text-muted-foreground">Unmatched Rows</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-amber-500/10">
+                <p className="font-data text-xl font-bold text-amber-600">{unmatchedLabourHours.toFixed(2)}</p>
+                <p className="text-xs text-muted-foreground">Unmatched Hours</p>
+              </div>
             </div>
-            <div className="text-center p-4 rounded-lg bg-amber-500/10">
-              <p className="font-data text-2xl font-bold text-amber-600">{unmatchedLabourHours.toFixed(2)}</p>
-              <p className="text-sm text-muted-foreground">Unmatched Hours</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Progress Overview</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Progress Overview</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+        <CardContent className="pt-0">
+          <div className="space-y-2">
             <div>
-              <div className="flex items-center justify-between text-sm mb-2">
+              <div className="flex items-center justify-between text-sm mb-1.5">
                 <span>Task Completion</span>
                 <span className="font-medium">{completedTasks} / {tasks.length} tasks</span>
               </div>
               <Progress value={taskProgress} className="h-2" />
             </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
-              <div className="text-center p-4 rounded-lg bg-muted/50">
-                <p className="font-data text-2xl font-bold">{tasks.length}</p>
-                <p className="text-sm text-muted-foreground">Total Tasks</p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+              <div className="text-center p-3 rounded-lg border bg-muted/30">
+                <p className="font-data text-xl font-bold">{tasks.length}</p>
+                <p className="text-xs text-muted-foreground">Total Tasks</p>
               </div>
-              <div className="text-center p-4 rounded-lg bg-green-500/10">
-                <p className="font-data text-2xl font-bold text-green-600">{completedTasks}</p>
-                <p className="text-sm text-muted-foreground">Completed</p>
+              <div className="text-center p-3 rounded-lg bg-green-500/10">
+                <p className="font-data text-xl font-bold text-green-600">{completedTasks}</p>
+                <p className="text-xs text-muted-foreground">Completed</p>
               </div>
-              <div className="text-center p-4 rounded-lg bg-blue-500/10">
-                <p className="font-data text-2xl font-bold text-blue-600">
-                  {tasks.filter(t => t.status === 'active').length}
-                </p>
-                <p className="text-sm text-muted-foreground">In Progress</p>
+              <div className="text-center p-3 rounded-lg bg-blue-500/10">
+                <p className="font-data text-xl font-bold text-blue-600">{tasks.filter(t => t.status === 'active').length}</p>
+                <p className="text-xs text-muted-foreground">In Progress</p>
               </div>
-              <div className="text-center p-4 rounded-lg bg-red-500/10">
-                <p className="font-data text-2xl font-bold text-red-600">
-                  {tasks.filter(t => t.status === 'blocked').length}
-                </p>
-                <p className="text-sm text-muted-foreground">Blocked</p>
+              <div className="text-center p-3 rounded-lg bg-red-500/10">
+                <p className="font-data text-xl font-bold text-red-600">{tasks.filter(t => t.status === 'blocked').length}</p>
+                <p className="text-xs text-muted-foreground">Blocked</p>
               </div>
             </div>
           </div>
@@ -1079,6 +1089,16 @@ export default function JobDetailPage() {
                 />
               </div>
 
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label className="text-right">Actual Start</Label>
+                  <Input
+                    type="date"
+                    value={taskForm.actual_start}
+                    onChange={(e) => setTaskForm({ ...taskForm, actual_start: e.target.value })}
+                    className="col-span-3"
+                  />
+                </div>
+
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Duration</Label>
                 <div className="col-span-3 flex items-center gap-2">
@@ -1124,6 +1144,37 @@ export default function JobDetailPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label className="text-right">Actual Hours</Label>
+                  <div className="col-span-3 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      step="0.5"
+                      value={taskForm.actual_hours}
+                      onChange={(e) => setTaskForm({ ...taskForm, actual_hours: e.target.value })}
+                      placeholder="0"
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">hours</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label className="text-right">Progress %</Label>
+                  <div className="col-span-3 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={taskForm.percent_complete}
+                      onChange={(e) => setTaskForm({ ...taskForm, percent_complete: e.target.value })}
+                      placeholder="0"
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">percent</span>
+                  </div>
+                </div>
 
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Internal?</Label>
@@ -1235,6 +1286,12 @@ export default function JobDetailPage() {
                       <p className="font-medium">{new Date(selectedTask.planned_start).toLocaleDateString()}</p>
                     </div>
                   )}
+                    {selectedTask.actual_start && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Actual Start</p>
+                        <p className="font-medium">{new Date(selectedTask.actual_start).toLocaleDateString()}</p>
+                      </div>
+                    )}
                   {selectedTask.planned_finish && (
                     <div>
                       <p className="text-sm text-muted-foreground">End Date</p>
@@ -1633,6 +1690,7 @@ export default function JobDetailPage() {
     </div>
   );
 }
+
 
 
 
