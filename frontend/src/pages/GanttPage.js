@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,7 @@ export default function GanttPage() {
   const [job, setJob] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [programme, setProgramme] = useState([]);
+  const [analysisPayload, setAnalysisPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
@@ -50,15 +51,48 @@ export default function GanttPage() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [jobRes, tasksRes, progRes] = await Promise.all([
+      const [jobRes, tasksRes, progRes, analysisRes] = await Promise.all([
         api.get(`/jobs/${jobId}`),
         api.get(`/tasks?job_id=${jobId}`),
         api.get(`/jobs/${jobId}/programme`),
+        api.get(`/jobs/${jobId}/resource-analysis`),
       ]);
+
+      const analysisData = analysisRes.data || {};
+      const analysisTasks = analysisData.tasks || [];
+      const analysisById = Object.fromEntries(
+        analysisTasks.map((row) => [row.task_id, row])
+      );
+
+      const mergedTasks = (tasksRes.data || []).map((task) => {
+        const recovery = analysisById[task.id];
+        if (!recovery) return task;
+
+        return {
+          ...task,
+          required_crew_standard: recovery.required_crew_standard,
+          required_crew_with_saturday: recovery.required_crew_with_saturday,
+          average_hours_per_day_standard: recovery.average_hours_per_day_standard,
+          average_hours_per_day_with_saturday: recovery.average_hours_per_day_with_saturday,
+          duration_days_at_standard_crew: recovery.duration_days_at_standard_crew,
+          duration_gap_days_at_standard_crew: recovery.duration_gap_days_at_standard_crew,
+          duration_days_at_required_crew_standard: recovery.duration_days_at_required_crew_standard,
+          duration_days_at_required_crew_with_saturday: recovery.duration_days_at_required_crew_with_saturday,
+          extra_crew_needed_standard: recovery.extra_crew_needed_standard,
+          extra_crew_needed_with_saturday: recovery.extra_crew_needed_with_saturday,
+          recommended_recovery_crew: recovery.recommended_recovery_crew,
+          recovery_strategy: recovery.recovery_strategy,
+          programme_feasible: recovery.programme_feasible,
+          requires_saturday: recovery.requires_saturday,
+        };
+      });
+
       setJob(jobRes.data);
-      setTasks(tasksRes.data);
+      setTasks(mergedTasks);
       setProgramme(progRes.data);
+      setAnalysisPayload(analysisData);
     } catch (error) {
+      setAnalysisPayload(null);
       toast.error('Failed to load job data');
     } finally {
       setLoading(false);
@@ -201,7 +235,11 @@ export default function GanttPage() {
           <Badge variant="outline">
             {tasks.length} Tasks
           </Badge>
-          {tasks.some(t => t.is_blocked || t.status === 'blocked') && (
+                      {analysisPayload?.summary?.tasks_overallocated > 0 && (
+              <Badge variant="destructive">
+                {analysisPayload.summary.tasks_overallocated} Overallocated
+              </Badge>
+            )}{tasks.some(t => t.is_blocked || t.status === 'blocked') && (
             <Badge variant="destructive">
               <AlertTriangle className="mr-1 h-3 w-3" />
               Blockers
@@ -319,6 +357,18 @@ export default function GanttPage() {
                   {tasks.filter(t => t.status === 'blocked' || t.is_blocked).length}
                 </span>
               </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Overallocated</span>
+                  <span className="font-medium text-red-600">
+                    {analysisPayload?.summary?.tasks_overallocated ?? "-"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Max Recovery Crew</span>
+                  <span className="font-medium">
+                    {analysisPayload?.summary?.max_required_crew_standard ?? "-"}
+                  </span>
+                </div>
             </CardContent>
           </Card>
 
@@ -364,26 +414,26 @@ export default function GanttPage() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Trade</span>
-                    <p className="mt-1 font-medium">{selectedTask.trade_resource || selectedTask.owner_party || '—'}</p>
+                    <p className="mt-1 font-medium">{selectedTask.trade_resource || selectedTask.owner_party || 'â€”'}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Start Date</span>
-                    <p className="mt-1 font-medium">{selectedTask.planned_start || '—'}</p>
+                    <p className="mt-1 font-medium">{selectedTask.planned_start || 'â€”'}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Finish Date</span>
-                    <p className="mt-1 font-medium">{selectedTask.planned_finish || '—'}</p>
+                    <p className="mt-1 font-medium">{selectedTask.planned_finish || 'â€”'}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Crew Size</span>
                     <p className="mt-1 font-medium flex items-center gap-1">
                       <Users className="h-4 w-4" />
-                      {selectedTask.crew_size || '—'}
+                      {selectedTask.crew_size || 'â€”'}
                     </p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Quoted Hours</span>
-                    <p className="mt-1 font-medium">{selectedTask.quoted_hours || '—'}</p>
+                    <p className="mt-1 font-medium">{selectedTask.quoted_hours || 'â€”'}</p>
                   </div>
                 </div>
 
@@ -437,3 +487,6 @@ export default function GanttPage() {
     </div>
   );
 }
+
+
+

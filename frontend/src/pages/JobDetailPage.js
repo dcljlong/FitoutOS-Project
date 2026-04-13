@@ -459,24 +459,34 @@ export default function JobDetailPage() {
           </div>
           
           {canManage() && (
-            <div className="flex gap-2 flex-wrap">
-              <Link to={`/resource-analysis/${jobId}`}>
-                <Button variant="outline">
-                  Resource Analysis
-                </Button>
-              </Link>
-              <Link to={`/jobs/${jobId}/setup`}>
-                <Button variant="outline">
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload & Analyze
-                </Button>
-              </Link>
+              <div className="flex gap-2 flex-wrap">
+                <Link to={`/jobs/${jobId}/programmes`}>
+                  <Button variant="outline">
+                    Programmes
+                  </Button>
+                </Link>
+                <Link to={`/jobs/${jobId}/gantt`}>
+                  <Button variant="outline">
+                    Gantt
+                  </Button>
+                </Link>
+                <Link to={`/resource-analysis/${jobId}`}>
+                  <Button variant="outline">
+                    Resource Analysis
+                  </Button>
+                </Link>
+                <Link to={`/jobs/${jobId}/setup`}>
+                  <Button variant="outline">
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload & Analyze
+                  </Button>
+                </Link>
                 <Button variant="outline" onClick={() => { window.location.href = `/jobs/${jobId}/setup?step=0`; }}>
-                <Edit className="mr-2 h-4 w-4" />
-                Edit Job
-              </Button>
-            </div>
-          )}
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Job
+                </Button>
+              </div>
+            )}
         </div>
       </div>
 
@@ -1623,6 +1633,8 @@ export default function JobDetailPage() {
     </div>
   );
 }
+
+
 
 
 
