@@ -1,4 +1,4 @@
-﻿
+
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import shutil
 import re
 import math
 import logging
@@ -508,6 +509,7 @@ class TaskCreate(BaseModel):
     task_name: str
     task_type: Optional[str] = None
     linked_task_codes: List[str] = []
+    linked_file_ids: List[str] = []
     planned_start: Optional[str] = None
     planned_finish: Optional[str] = None
     actual_start: Optional[str] = None
@@ -518,21 +520,32 @@ class TaskCreate(BaseModel):
     is_internal: bool = True
     subcontractor_id: Optional[str] = None
     zone_area: Optional[str] = None
+    level: Optional[str] = None
+    package: Optional[str] = None
+    contract: Optional[str] = None
     status: str = "planned"
+    rag_status: Optional[str] = None
     blockers: Optional[str] = None
+    interface_prompt: Optional[str] = None
+    hold_point: Optional[str] = None
     notes: Optional[str] = None
+    gain_note: Optional[str] = None
+    snapshot_note: Optional[str] = None
     quoted_hours: Optional[float] = None
     actual_hours: Optional[float] = 0
     percent_complete: int = 0
     locked: bool = False
+    is_long_lead: bool = False
+    earliest_possible_start: Optional[str] = None
+    manual_start_override: Optional[str] = None
+    rounded_crew: Optional[int] = None
     # New fields for crew/resource
     crew_size: Optional[float] = None
     hours_per_day: Optional[float] = 8.0
     overtime_allowed: bool = False
     saturday_allowed: bool = False
     trade_resource: Optional[str] = None
-    # Prerequisite tracking
-    prerequisite_owner: Optional[str] = None  # Who is responsible for prerequisite
+    prerequisite_owner: Optional[str] = None
     prerequisite_status: str = "pending"  # pending, ready, waiting, blocked, complete
     prerequisite_note: Optional[str] = None
     risk_flag: bool = False
@@ -546,6 +559,7 @@ class TaskResponse(BaseModel):
     task_name: str
     task_type: Optional[str] = None
     linked_task_codes: List[str]
+    linked_file_ids: List[str] = []
     planned_start: Optional[str] = None
     planned_finish: Optional[str] = None
     actual_start: Optional[str] = None
@@ -556,13 +570,25 @@ class TaskResponse(BaseModel):
     is_internal: bool
     subcontractor_id: Optional[str] = None
     zone_area: Optional[str] = None
+    level: Optional[str] = None
+    package: Optional[str] = None
+    contract: Optional[str] = None
     status: str
+    rag_status: Optional[str] = None
     blockers: Optional[str] = None
+    interface_prompt: Optional[str] = None
+    hold_point: Optional[str] = None
     notes: Optional[str] = None
+    gain_note: Optional[str] = None
+    snapshot_note: Optional[str] = None
     quoted_hours: Optional[float] = None
     actual_hours: float = 0
     percent_complete: int = 0
     locked: bool = False
+    is_long_lead: bool = False
+    earliest_possible_start: Optional[str] = None
+    manual_start_override: Optional[str] = None
+    rounded_crew: Optional[int] = None
     is_critical: bool = False
     total_float: Optional[int] = None
     created_at: str = ""
@@ -577,7 +603,6 @@ class TaskResponse(BaseModel):
     prerequisite_note: Optional[str] = None
     risk_flag: bool = False
     pre_start_checklist: Optional[List[Dict[str, Any]]] = None
-    # Computed warning flags
     is_blocked: bool = False
     has_incomplete_checklist: bool = False
     delay_risk: bool = False
@@ -701,6 +726,15 @@ class MaterialResponse(BaseModel):
     order_due_date: Optional[str] = None
     delivery_due_date: Optional[str] = None
     status: str
+
+
+class FileReviewUpdate(BaseModel):
+    needs_review: Optional[bool] = None
+    reference_only: Optional[bool] = None
+    detected_document_type: Optional[str] = None
+    mapping_notes: Optional[str] = None
+    use_for_programme: Optional[bool] = None
+    use_for_scope: Optional[bool] = None
 
 
 class AISettingsUpdate(BaseModel):
@@ -922,10 +956,40 @@ async def update_job(job_id: str, job_data: JobCreate, user: dict = Depends(requ
 
 
 @api_router.delete("/jobs/{job_id}")
-async def delete_job(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN))):
+async def delete_job(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
+    existing = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    file_records = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(500)
+    for file_record in file_records:
+        filepath = file_record.get("filepath")
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+
+    upload_dir = UPLOAD_DIR / job_id
+    if upload_dir.exists():
+        shutil.rmtree(upload_dir, ignore_errors=True)
+
+    for collection_name in [
+        "job_files",
+        "job_analysis",
+        "job_programme",
+        "job_programme_parsed",
+        "job_task_codes",
+        "tasks",
+        "scope_items",
+        "actual_labour",
+    ]:
+        await db[collection_name].delete_many({"job_id": job_id})
+
     result = await db.jobs.delete_one({"id": job_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Job not found")
+
     return {"message": "Job deleted"}
 
 
@@ -1090,6 +1154,18 @@ def enrich_task_response(task: dict, all_tasks: List[dict] = None) -> dict:
     task.setdefault("saturday_allowed", False)
     task.setdefault("trade_resource", None)
     task.setdefault("prerequisite_owner", None)
+    task.setdefault("level", None)
+    task.setdefault("package", None)
+    task.setdefault("contract", None)
+    task.setdefault("rag_status", None)
+    task.setdefault("interface_prompt", None)
+    task.setdefault("hold_point", None)
+    task.setdefault("gain_note", None)
+    task.setdefault("snapshot_note", None)
+    task.setdefault("is_long_lead", False)
+    task.setdefault("earliest_possible_start", None)
+    task.setdefault("manual_start_override", None)
+    task.setdefault("rounded_crew", None)
     task.setdefault("prerequisite_status", "pending")
     task.setdefault("prerequisite_note", None)
     task.setdefault("risk_flag", False)
@@ -1225,6 +1301,58 @@ def calculate_critical_path(tasks: List[dict]) -> List[dict]:
         del task["_duration"]
     
     return tasks
+
+
+@api_router.post("/tasks/{task_id}/files/{file_id}/link", response_model=TaskResponse)
+async def link_file_to_task(
+    task_id: str,
+    file_id: str,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    file_record = await db.job_files.find_one({"job_id": task["job_id"], "id": file_id}, {"_id": 0})
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    linked_ids = list(task.get("linked_file_ids") or [])
+    if file_id not in linked_ids:
+        linked_ids.append(file_id)
+
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": {"linked_file_ids": linked_ids}}
+    )
+
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    all_tasks = await db.tasks.find({"job_id": updated["job_id"]}, {"_id": 0}).to_list(1000)
+    enriched = enrich_task_response(updated, all_tasks)
+    return TaskResponse(**enriched)
+
+
+@api_router.delete("/tasks/{task_id}/files/{file_id}/link", response_model=TaskResponse)
+async def unlink_file_from_task(
+    task_id: str,
+    file_id: str,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    linked_ids = [fid for fid in list(task.get("linked_file_ids") or []) if fid != file_id]
+
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": {"linked_file_ids": linked_ids}}
+    )
+
+    updated = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    all_tasks = await db.tasks.find({"job_id": updated["job_id"]}, {"_id": 0}).to_list(1000)
+    enriched = enrich_task_response(updated, all_tasks)
+    return TaskResponse(**enriched)
 
 
 @api_router.post("/tasks", response_model=TaskResponse)
@@ -2042,6 +2170,7 @@ async def upload_job_files(
         ".xlsx",
         ".xls",
         ".csv",
+        ".mpp",
         ".docx",
         ".txt",
         ".jpg",
@@ -2082,7 +2211,10 @@ async def upload_job_files(
         elif file_ext in {".docx"}:
             parse_status = "uploaded"
             warnings.append("DOCX uploaded. Parsing support to be expanded.")
-        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt"}:
+        elif file_ext in {".mpp"}:
+            parse_status = "uploaded"
+            warnings.append("MPP uploaded. Programme parsing enabled.")
+        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".mpp"}:
             reference_only = True
             parse_status = "reference_only"
             warnings.append("Stored as reference only.")
@@ -2154,6 +2286,187 @@ async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
     return files
 
 
+@api_router.put("/jobs/{job_id}/files/{file_id}/review")
+async def update_job_file_review(
+    job_id: str,
+    file_id: str,
+    review_data: FileReviewUpdate,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    file_record = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    update_data = {k: v for k, v in review_data.model_dump().items() if v is not None}
+    if not update_data:
+        return file_record
+
+    update_data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["reviewed_by"] = user["id"]
+
+    await db.job_files.update_one(
+        {"job_id": job_id, "id": file_id},
+        {"$set": update_data}
+    )
+
+    updated = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
+    return updated
+
+
+def _mpp_date_to_iso(value):
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text or text.lower() == "null":
+        return None
+
+    return text[:10] if len(text) >= 10 else None
+
+
+def _mpp_duration_to_days(duration_obj):
+    if duration_obj is None:
+        return None
+
+    try:
+        value = float(duration_obj.getDuration())
+    except Exception:
+        return None
+
+    try:
+        units = str(duration_obj.getUnits()).upper()
+    except Exception:
+        units = ""
+
+    if "HOUR" in units:
+        return round(value / 8.0, 2)
+    if "MINUTE" in units:
+        return round(value / 480.0, 2)
+    if "WEEK" in units:
+        return round(value * 5.0, 2)
+    if "MONTH" in units:
+        return round(value * 20.0, 2)
+
+    return round(value, 2)
+
+
+def parse_mpp_file(filepath):
+    import jpype
+    import jpype.imports
+    import mpxj  # noqa: F401
+
+    if not jpype.isJVMStarted():
+        jpype.startJVM("-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory")
+
+    from org.mpxj.reader import UniversalProjectReader
+
+    project = UniversalProjectReader().read(filepath)
+
+    items = []
+    warnings = []
+    errors = []
+
+    for task in project.getTasks():
+        if task is None:
+            continue
+
+        try:
+            name = str(task.getName()).strip() if task.getName() is not None else ""
+        except Exception:
+            name = ""
+
+        if not name:
+            continue
+
+        try:
+            unique_id = task.getUniqueID()
+            task_id = unique_id if unique_id is not None else task.getID()
+        except Exception:
+            task_id = None
+
+        predecessors = []
+        try:
+            rels = task.getPredecessors()
+            if rels:
+                for rel in rels:
+                    try:
+                        pred_task = rel.getPredecessorTask()
+                        if pred_task is None:
+                            continue
+                        pred_uid = pred_task.getUniqueID()
+                        if pred_uid is None:
+                            pred_uid = pred_task.getID()
+                        if pred_uid is not None:
+                            predecessors.append(str(pred_uid))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        try:
+            percent_complete = task.getPercentageComplete()
+            if percent_complete is not None:
+                percent_complete = float(percent_complete)
+        except Exception:
+            percent_complete = None
+
+        try:
+            outline_level = task.getOutlineLevel()
+            if outline_level is not None:
+                outline_level = int(outline_level)
+        except Exception:
+            outline_level = None
+
+        try:
+            wbs = str(task.getWBS()).strip() if task.getWBS() is not None else ""
+        except Exception:
+            wbs = ""
+
+        try:
+            is_summary = bool(task.getSummary())
+        except Exception:
+            is_summary = False
+
+        try:
+            is_milestone = bool(task.getMilestone())
+        except Exception:
+            is_milestone = False
+
+        items.append({
+            "source_id": str(task_id) if task_id is not None else str(uuid.uuid4()),
+            "name": name,
+            "phase": wbs,
+            "trade": "",
+            "planned_start": _mpp_date_to_iso(task.getStart()),
+            "planned_finish": _mpp_date_to_iso(task.getFinish()),
+            "duration": _mpp_duration_to_days(task.getDuration()),
+            "depends_on": predecessors,
+            "task_code_id": None,
+            "crew_size": None,
+            "percent_complete": percent_complete,
+            "is_summary": is_summary,
+            "is_milestone": is_milestone,
+            "outline_level": outline_level,
+            "source_format": "mpp"
+        })
+
+    return {
+        "success": True,
+        "item_count": len(items),
+        "warning_count": len(warnings),
+        "error_count": len(errors),
+        "parse_result": {
+            "items": items,
+            "warnings": warnings,
+            "errors": errors,
+            "metadata": {
+                "source_format": "mpp",
+                "task_count": len(items)
+            }
+        }
+    }
+
+
 @api_router.post("/jobs/{job_id}/parse-programme")
 async def parse_job_programme_file(
     job_id: str,
@@ -2161,7 +2474,7 @@ async def parse_job_programme_file(
     user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
 ):
     """
-    Parse an uploaded programme file (Excel/CSV) and return structured items for review.
+    Parse an uploaded programme file (Excel/CSV/MPP) and return structured items for review.
     If file_id is provided, parse that specific file. Otherwise, parse the most recent
     programme file for this job.
     
@@ -2179,7 +2492,7 @@ async def parse_job_programme_file(
         raise HTTPException(status_code=404, detail="No files uploaded for this job")
     
     # Filter to programme-parsable files
-    programme_extensions = ['.xlsx', '.xls', '.csv']
+    programme_extensions = ['.xlsx', '.xls', '.csv', '.mpp']
     programme_files = [
         f for f in files 
         if any(f.get("filename", "").lower().endswith(ext) for ext in programme_extensions)
@@ -2188,7 +2501,7 @@ async def parse_job_programme_file(
     if not programme_files:
         raise HTTPException(
             status_code=400, 
-            detail="No Excel or CSV files found. Please upload a programme file (.xlsx, .xls, or .csv)"
+            detail="No programme files found. Please upload a programme file (.xlsx, .xls, .csv, or .mpp)"
         )
     
     # Select file to parse
@@ -2209,7 +2522,10 @@ async def parse_job_programme_file(
     
     # Parse the file
     try:
-        parse_result = parse_uploaded_file(filepath, filename)
+        if filename.lower().endswith(".mpp"):
+            parse_result = parse_mpp_file(filepath)
+        else:
+            parse_result = parse_uploaded_file(filepath, filename)
     except Exception as e:
         logger.error(f"Failed to parse programme file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
@@ -2334,6 +2650,9 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                     continue
 
             elif filepath.endswith(".jpg") or filepath.endswith(".jpeg") or filepath.endswith(".png") or filepath.endswith(".webp"):
+                continue
+
+            elif filepath.endswith(".mpp"):
                 continue
 
             else:
@@ -2891,6 +3210,7 @@ class TaskCreate(BaseModel):
     task_name: str
     task_type: Optional[str] = None
     linked_task_codes: List[str] = []
+    linked_file_ids: List[str] = []
     planned_start: Optional[str] = None
     planned_finish: Optional[str] = None
     actual_start: Optional[str] = None
@@ -2901,10 +3221,23 @@ class TaskCreate(BaseModel):
     is_internal: bool = True
     subcontractor_id: Optional[str] = None
     zone_area: Optional[str] = None
+    level: Optional[str] = None
+    package: Optional[str] = None
+    contract: Optional[str] = None
     status: str = "planned"
+    rag_status: Optional[str] = None
     blockers: Optional[str] = None
     notes: Optional[str] = None
+    interface_prompt: Optional[str] = None
+    hold_point: Optional[str] = None
+    gain_note: Optional[str] = None
+    snapshot_note: Optional[str] = None
     quoted_hours: Optional[float] = None
+    actual_hours: Optional[float] = 0
+    is_long_lead: bool = False
+    earliest_possible_start: Optional[str] = None
+    manual_start_override: Optional[str] = None
+    rounded_crew: Optional[int] = None
     percent_complete: int = 0
     locked: bool = False
     # New fields for crew/resource
@@ -2928,6 +3261,7 @@ class TaskResponse(BaseModel):
     task_name: str
     task_type: Optional[str] = None
     linked_task_codes: List[str]
+    linked_file_ids: List[str] = []
     planned_start: Optional[str] = None
     planned_finish: Optional[str] = None
     actual_start: Optional[str] = None
@@ -2938,10 +3272,22 @@ class TaskResponse(BaseModel):
     is_internal: bool
     subcontractor_id: Optional[str] = None
     zone_area: Optional[str] = None
+    level: Optional[str] = None
+    package: Optional[str] = None
+    contract: Optional[str] = None
     status: str
+    rag_status: Optional[str] = None
     blockers: Optional[str] = None
     notes: Optional[str] = None
+    interface_prompt: Optional[str] = None
+    hold_point: Optional[str] = None
+    gain_note: Optional[str] = None
+    snapshot_note: Optional[str] = None
     quoted_hours: Optional[float] = None
+    is_long_lead: bool = False
+    earliest_possible_start: Optional[str] = None
+    manual_start_override: Optional[str] = None
+    rounded_crew: Optional[int] = None
     actual_hours: float = 0
     percent_complete: int = 0
     locked: bool = False
@@ -4424,6 +4770,7 @@ async def upload_job_files(
         ".xlsx",
         ".xls",
         ".csv",
+        ".mpp",
         ".docx",
         ".txt",
         ".jpg",
@@ -4464,7 +4811,10 @@ async def upload_job_files(
         elif file_ext in {".docx"}:
             parse_status = "uploaded"
             warnings.append("DOCX uploaded. Parsing support to be expanded.")
-        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt"}:
+        elif file_ext in {".mpp"}:
+            parse_status = "uploaded"
+            warnings.append("MPP uploaded. Programme parsing enabled.")
+        elif file_ext not in {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".mpp"}:
             reference_only = True
             parse_status = "reference_only"
             warnings.append("Stored as reference only.")
@@ -4543,7 +4893,7 @@ async def parse_job_programme_file(
     user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
 ):
     """
-    Parse an uploaded programme file (Excel/CSV) and return structured items for review.
+    Parse an uploaded programme file (Excel/CSV/MPP) and return structured items for review.
     If file_id is provided, parse that specific file. Otherwise, parse the most recent
     programme file for this job.
     
@@ -4561,7 +4911,7 @@ async def parse_job_programme_file(
         raise HTTPException(status_code=404, detail="No files uploaded for this job")
     
     # Filter to programme-parsable files
-    programme_extensions = ['.xlsx', '.xls', '.csv']
+    programme_extensions = ['.xlsx', '.xls', '.csv', '.mpp']
     programme_files = [
         f for f in files 
         if any(f.get("filename", "").lower().endswith(ext) for ext in programme_extensions)
@@ -4570,7 +4920,7 @@ async def parse_job_programme_file(
     if not programme_files:
         raise HTTPException(
             status_code=400, 
-            detail="No Excel or CSV files found. Please upload a programme file (.xlsx, .xls, or .csv)"
+            detail="No programme files found. Please upload a programme file (.xlsx, .xls, .csv, or .mpp)"
         )
     
     # Select file to parse
@@ -4591,7 +4941,10 @@ async def parse_job_programme_file(
     
     # Parse the file
     try:
-        parse_result = parse_uploaded_file(filepath, filename)
+        if filename.lower().endswith(".mpp"):
+            parse_result = parse_mpp_file(filepath)
+        else:
+            parse_result = parse_uploaded_file(filepath, filename)
     except Exception as e:
         logger.error(f"Failed to parse programme file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
@@ -5838,20 +6191,62 @@ async def confirm_job_analysis(
     await db.scope_items.delete_many({"job_id": job_id})
     await db.tasks.delete_many({"job_id": job_id, "is_internal": True})
 
-    if "programme" in confirmed_data:
+    incoming_programme_items = confirmed_data.get("programme") or []
+
+    latest_parsed = await db.job_programme_parsed.find_one(
+        {"job_id": job_id},
+        {"_id": 0},
+        sort=[("created_at", -1)]
+    )
+    parsed_programme_items = latest_parsed.get("items", []) if latest_parsed else []
+
+    incoming_has_mpp = any(
+        isinstance(item, dict) and item.get("source_format") == "mpp"
+        for item in incoming_programme_items
+    )
+    parsed_has_mpp = any(
+        isinstance(item, dict) and item.get("source_format") == "mpp"
+        for item in parsed_programme_items
+    )
+
+    if incoming_has_mpp:
+        programme_items = incoming_programme_items
+    elif parsed_has_mpp:
+        programme_items = parsed_programme_items
+    elif incoming_programme_items:
+        programme_items = incoming_programme_items
+    else:
+        programme_items = parsed_programme_items
+
+    if programme_items:
         await db.job_programme.delete_many({"job_id": job_id})
 
-        for item in confirmed_data["programme"]:
+        for item in programme_items:
+            if not isinstance(item, dict):
+                continue
+
+            programme_name = item.get("name") or item.get("task_name") or item.get("item")
+            if not programme_name:
+                continue
+
             programme_row = {
                 "id": str(uuid.uuid4()),
                 "job_id": job_id,
-                "name": item.get("name"),
+                "source_id": item.get("source_id"),
+                "name": programme_name,
                 "phase": item.get("phase"),
                 "trade": item.get("trade"),
-                "duration": item.get("duration"),
-                "duration_unit": item.get("duration_unit"),
+                "planned_start": item.get("planned_start"),
+                "planned_finish": item.get("planned_finish"),
+                "duration": item.get("duration") if item.get("duration") is not None else item.get("duration_days"),
+                "duration_unit": item.get("duration_unit") or "days",
                 "depends_on": item.get("depends_on", []),
+                "percent_complete": item.get("percent_complete"),
+                "is_summary": bool(item.get("is_summary", False)),
+                "is_milestone": bool(item.get("is_milestone", False)),
+                "outline_level": item.get("outline_level"),
                 "confidence": item.get("confidence", "manual"),
+                "source_format": item.get("source_format"),
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.job_programme.insert_one(programme_row)
@@ -5947,14 +6342,33 @@ async def confirm_job_analysis(
         for scope_data in confirmed_data["scope_items"]:
             if isinstance(scope_data, str):
                 scope_data = {"item": scope_data}
+
+            scope_label = (
+                scope_data.get("item")
+                or scope_data.get("description")
+                or scope_data.get("name")
+                or scope_data.get("package")
+            )
+
+            quoted_hours = (
+                scope_data.get("quoted_hours")
+                if scope_data.get("quoted_hours") not in [None, ""]
+                else scope_data.get("hours")
+            )
+
+            if scope_label in [None, ""] and quoted_hours in [None, ""]:
+                continue
+
             scope_item = {
                 "id": str(uuid.uuid4()),
                 "job_id": job_id,
-                "item": scope_data.get("item"),
+                "item": scope_label,
+                "description": scope_data.get("description") or scope_label,
+                "package": scope_data.get("package"),
                 "quantity": scope_data.get("quantity"),
                 "unit": scope_data.get("unit"),
-                "quoted_hours": scope_data.get("quoted_hours"),
-                "approved_hours": scope_data.get("quoted_hours"),
+                "quoted_hours": quoted_hours,
+                "approved_hours": quoted_hours,
                 "approval_status": "pending",
                 "approved_at": None,
                 "approved_by": None,
@@ -6137,12 +6551,62 @@ async def generate_tasks_from_programme(
         {"job_id": job_id, "is_active": True},
         {"_id": 0}
     ).to_list(1000)
+    scope_rows = await db.scope_items.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
+
+    def resolve_job_code_family(code_row):
+        family = detect_task_code_family(code_row.get("code", ""))
+        if family != "other":
+            return family
+
+        fallback_text = " ".join([
+            str(code_row.get("name") or ""),
+            str(code_row.get("custom_label") or ""),
+            str(code_row.get("code") or ""),
+        ])
+        return detect_task_family(fallback_text)
+
+    code_families_by_id = {
+        code_row.get("id"): resolve_job_code_family(code_row)
+        for code_row in job_task_codes
+        if code_row.get("id")
+    }
+
+    allowed_families = {
+        family for family in code_families_by_id.values()
+        if family and family != "other"
+    }
+
+    if not allowed_families:
+        for scope_row in scope_rows:
+            scope_text = " ".join([
+                str(scope_row.get("item") or ""),
+                str(scope_row.get("description") or ""),
+            ])
+            family = detect_task_family(scope_text)
+            if family != "other":
+                allowed_families.add(family)
 
     created_tasks = []
     programme_id_to_task_id = {}
     seen_programme_ids = set()
 
     for item in programme:
+        if item.get("source_format") == "mpp" and (item.get("is_summary") or item.get("is_milestone")):
+            continue
+
+        family_source_text = " ".join([
+            str(item.get("name") or ""),
+            str(item.get("trade") or ""),
+            str(item.get("phase") or ""),
+        ])
+        task_family = detect_task_family(family_source_text)
+
+        if task_family == "other":
+            continue
+
+        if allowed_families and task_family not in allowed_families:
+            continue
+
         source_programme_id = item.get("id")
         seen_programme_ids.add(source_programme_id)
 
@@ -6156,12 +6620,14 @@ async def generate_tasks_from_programme(
         except Exception:
             duration_days = None
 
-        task_family = detect_task_family(item.get("name", ""))
         auto_linked_code_ids = [
             code_row.get("id")
             for code_row in job_task_codes
-            if code_row.get("id") and detect_task_code_family(code_row.get("code", "")) == task_family
+            if code_row.get("id") and code_families_by_id.get(code_row.get("id")) == task_family
         ]
+
+        if not auto_linked_code_ids:
+            continue
 
         task_data = {
             "job_id": job_id,
@@ -6169,8 +6635,8 @@ async def generate_tasks_from_programme(
             "source_programme_id": source_programme_id,
             "task_type": item.get("phase"),
             "linked_task_codes": existing_task.get("linked_task_codes") if existing_task and existing_task.get("linked_task_codes") else auto_linked_code_ids,
-            "planned_start": existing_task.get("planned_start") if existing_task else None,
-            "planned_finish": existing_task.get("planned_finish") if existing_task else None,
+            "planned_start": existing_task.get("planned_start") if existing_task and existing_task.get("planned_start") else item.get("planned_start"),
+            "planned_finish": existing_task.get("planned_finish") if existing_task and existing_task.get("planned_finish") else item.get("planned_finish"),
             "duration_days": duration_days,
             "predecessor_ids": [],
             "owner_party": item.get("trade"),

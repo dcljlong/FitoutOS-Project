@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -109,6 +110,9 @@ export default function JobDetailPage() {
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [analyzingDocs, setAnalyzingDocs] = useState(false);
   
   // Task dialog state
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
@@ -126,9 +130,21 @@ export default function JobDetailPage() {
     is_internal: true,
     subcontractor_id: '',
     zone_area: '',
+    level: '',
+    package: '',
+    contract: '',
     status: 'planned',
+    rag_status: '',
     notes: '',
+    interface_prompt: '',
+    hold_point: '',
+    gain_note: '',
+    snapshot_note: '',
     quoted_hours: '',
+    is_long_lead: false,
+    earliest_possible_start: '',
+    manual_start_override: '',
+    rounded_crew: '',
       actual_hours: '',
       percent_complete: '0',
   });
@@ -137,7 +153,10 @@ export default function JobDetailPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskMaterials, setTaskMaterials] = useState([]);
   const [loadingMaterials, setLoadingMaterials] = useState(false);
-  
+  const [documentActionDialogOpen, setDocumentActionDialogOpen] = useState(false);
+  const [activeDocument, setActiveDocument] = useState(null);
+  const [documentTaskSearch, setDocumentTaskSearch] = useState('');
+  const [pendingDocumentTask, setPendingDocumentTask] = useState(null);  
   // Material dialog state
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [savingMaterial, setSavingMaterial] = useState(false);
@@ -167,13 +186,14 @@ export default function JobDetailPage() {
 
   const fetchJobData = useCallback(async () => {
     try {
-      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, unmatchedRes] = await Promise.all([
+      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, documentsRes, unmatchedRes, analysisRes] = await Promise.all([
         api.get(`/jobs/${jobId}`),
         api.get(`/tasks?job_id=${jobId}`),
         api.get(`/jobs/${jobId}/task-codes`),
         api.get('/subcontractors'),
         api.get(`/delays?job_id=${jobId}`),
         api.get(`/jobs/${jobId}/programme`),
+        api.get(`/jobs/${jobId}/files`),
         api.get(`/jobs/${jobId}/unmatched-labour`),
         api.post(`/jobs/${jobId}/analyze`),
       ]);
@@ -184,6 +204,8 @@ export default function JobDetailPage() {
       setSubcontractors(subsRes.data);
       setDelays(delaysRes.data);
       setProgramme(programmeRes.data);
+      setDocuments(Array.isArray(documentsRes.data) ? documentsRes.data : []);
+      setAnalysis(analysisRes.data || jobRes.data?.latest_analysis || null);
       setUnmatchedLabour(unmatchedRes.data.rows || []);
       
     } catch (error) {
@@ -208,7 +230,143 @@ export default function JobDetailPage() {
     }
   };
 
-  const fetchTaskMaterials = async (taskId) => {
+    const handleUploadDocuments = async (event) => {
+    const input = event.target;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+
+    setUploadingDocs(true);
+    try {
+      const response = await api.post(`/jobs/${jobId}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success(response.data?.message || 'Documents uploaded');
+      input.value = '';
+      fetchJobData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to upload documents');
+    } finally {
+      setUploadingDocs(false);
+    }
+  };
+
+  const handleAnalyzeDocuments = async () => {
+    setAnalyzingDocs(true);
+    try {
+      const response = await api.post(`/jobs/${jobId}/analyze`);
+      setAnalysis(response.data || null);
+      toast.success('Documents analyzed');
+      fetchJobData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to analyze documents');
+    } finally {
+      setAnalyzingDocs(false);
+    }
+  };
+
+  const handleUpdateDocumentReview = async (fileId, payload) => {
+    try {
+      const response = await api.put(`/jobs/${jobId}/files/${fileId}/review`, payload);
+      setDocuments((prev) => prev.map((doc) => (doc.id === fileId ? response.data : doc)));
+      toast.success('Document review updated');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update document review');
+    }
+  };
+
+  const openDocumentActionDialog = (doc) => {
+    setActiveDocument(doc);
+    setDocumentTaskSearch('');
+    setDocumentActionDialogOpen(true);
+  };
+
+  const handleLinkDocumentToTask = async (fileId, presetTaskId = null) => {
+    const cleanTaskId = presetTaskId ? String(presetTaskId).split('|')[0].trim() : '';
+
+    if (!cleanTaskId) return;
+
+    try {
+      const response = await api.post(`/tasks/${cleanTaskId}/files/${fileId}/link`);
+      setTasks((prev) => prev.map((task) => (task.id === cleanTaskId ? response.data : task)));
+      await handleUpdateDocumentReview(fileId, { needs_review: false });
+      setDocumentActionDialogOpen(false);
+      setActiveDocument(null);
+      setDocumentTaskSearch('');
+      openTaskDetail(response.data);
+      toast.success('Document linked to task');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to link document to task');
+    }
+  };
+
+  const handleUnlinkDocumentFromTask = async (taskId, fileId) => {
+    try {
+      const response = await api.delete(`/tasks/${taskId}/files/${fileId}/link`);
+      const nextTasks = tasks.map((task) => (task.id === taskId ? response.data : task));
+      setTasks(nextTasks);
+
+      const stillLinkedElsewhere = nextTasks.some(
+        (task) => (task.linked_file_ids || []).includes(fileId)
+      );
+
+      if (!stillLinkedElsewhere) {
+        await handleUpdateDocumentReview(fileId, { needs_review: true });
+      }
+
+      toast.success('Document unlinked from task');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to unlink document from task');
+    }
+  };
+
+
+  const handleCreateTaskFromDocument = (doc) => {
+    setPendingDocumentTask(doc);
+    setEditingTask(null);
+    setTaskForm({
+      task_name: doc.detected_document_type
+        ? `${doc.detected_document_type} - review required`
+        : `${doc.original_filename || doc.filename || 'Document'} - review required`,
+      task_type: 'document_proposed',
+      linked_task_codes: [],
+      planned_start: '',
+      planned_finish: '',
+      actual_start: '',
+      duration_days: '',
+      owner_party: '',
+      is_internal: true,
+      subcontractor_id: '',
+      zone_area: '',
+      level: '',
+      package: doc.detected_document_type || '',
+      contract: '',
+      status: 'planned',
+      rag_status: 'amber',
+      notes: doc.mapping_notes || 'Created from document review',
+      interface_prompt: '',
+      hold_point: '',
+      gain_note: '',
+      snapshot_note: '',
+      quoted_hours: '',
+      is_long_lead: false,
+      earliest_possible_start: '',
+      manual_start_override: '',
+      rounded_crew: '',
+      actual_hours: '',
+      percent_complete: '0',
+    });
+    setDocumentActionDialogOpen(false);
+    setActiveDocument(null);
+    setDocumentTaskSearch('');
+    setTaskDialogOpen(true);
+  };
+
+
+
+const fetchTaskMaterials = async (taskId) => {
     setLoadingMaterials(true);
     try {
       const response = await api.get(`/materials?task_id=${taskId}`);
@@ -244,13 +402,26 @@ export default function JobDetailPage() {
       is_internal: true,
       subcontractor_id: '',
       zone_area: '',
+    level: '',
+    package: '',
+    contract: '',
       status: 'planned',
+    rag_status: '',
       notes: '',
+    interface_prompt: '',
+    hold_point: '',
+    gain_note: '',
+    snapshot_note: '',
       quoted_hours: '',
+    is_long_lead: false,
+    earliest_possible_start: '',
+    manual_start_override: '',
+    rounded_crew: '',
       actual_hours: '',
       percent_complete: '0',
     });
     setEditingTask(null);
+    setPendingDocumentTask(null);
   };
 
   const openTaskDialog = (task = null) => {
@@ -268,9 +439,21 @@ export default function JobDetailPage() {
         is_internal: task.is_internal,
         subcontractor_id: task.subcontractor_id || '',
         zone_area: task.zone_area || '',
+        level: task.level || '',
+        package: task.package || '',
+        contract: task.contract || '',
         status: task.status,
+        rag_status: task.rag_status || '',
         notes: task.notes || '',
+        interface_prompt: task.interface_prompt || '',
+        hold_point: task.hold_point || '',
+        gain_note: task.gain_note || '',
+        snapshot_note: task.snapshot_note || '',
         quoted_hours: task.quoted_hours?.toString() || '',
+        is_long_lead: task.is_long_lead || false,
+        earliest_possible_start: task.earliest_possible_start || '',
+        manual_start_override: task.manual_start_override || '',
+        rounded_crew: task.rounded_crew?.toString() || '',
           actual_hours: task.actual_hours?.toString() || '',
           percent_complete: task.percent_complete?.toString() || '0',
       });
@@ -297,12 +480,28 @@ export default function JobDetailPage() {
       is_internal: taskForm.is_internal,
       subcontractor_id: !taskForm.is_internal && taskForm.subcontractor_id ? taskForm.subcontractor_id : null,
       zone_area: taskForm.zone_area || null,
+      level: taskForm.level || null,
+      package: taskForm.package || null,
+      contract: taskForm.contract || null,
       status: taskForm.status,
+      rag_status: taskForm.rag_status || null,
       notes: taskForm.notes || null,
+      interface_prompt: taskForm.interface_prompt || null,
+      hold_point: taskForm.hold_point || null,
+      gain_note: taskForm.gain_note || null,
+      snapshot_note: taskForm.snapshot_note || null,
       quoted_hours: taskForm.quoted_hours ? parseFloat(taskForm.quoted_hours) : null,
+      is_long_lead: !!taskForm.is_long_lead,
+      earliest_possible_start: taskForm.earliest_possible_start || null,
+      manual_start_override: taskForm.manual_start_override || null,
+      rounded_crew: taskForm.rounded_crew ? parseInt(taskForm.rounded_crew) : null,
       actual_hours: taskForm.actual_hours ? parseFloat(taskForm.actual_hours) : 0,
       percent_complete: taskForm.percent_complete ? parseInt(taskForm.percent_complete) : 0,
     };
+
+    if (!editingTask && pendingDocumentTask) {
+      payload.linked_file_ids = [pendingDocumentTask.id];
+    }
 
     try {
       if (editingTask) {
@@ -311,8 +510,15 @@ export default function JobDetailPage() {
         toast.success('Task updated');
       } else {
         const response = await api.post('/tasks', payload);
-        setTasks([...tasks, response.data]);
-        toast.success('Task created');
+        setTasks((prev) => [...prev, response.data]);
+
+        if (pendingDocumentTask) {
+          await handleUpdateDocumentReview(pendingDocumentTask.id, { needs_review: false });
+          openTaskDetail(response.data);
+          toast.success('Proposed task created from document');
+        } else {
+          toast.success('Task created');
+        }
       }
       setTaskDialogOpen(false);
       resetTaskForm();
@@ -446,6 +652,72 @@ export default function JobDetailPage() {
 
   const getTaskActual = (task) => parseFloat(task.actual_hours || 0);
   const getTaskPlanned = (task) => parseFloat(task.quoted_hours || 0);
+  const normalizeMatchText = (value) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+  const getSuggestedTasksForDocument = (doc) => {
+    const sourceText = normalizeMatchText(
+      [
+        doc.original_filename,
+        doc.filename,
+        doc.name,
+        doc.detected_document_type,
+        doc.mapping_notes,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    );
+
+    if (!sourceText) return [];
+
+    const sourceWords = Array.from(
+      new Set(sourceText.split(' ').filter((word) => word.length >= 3))
+    );
+
+    return tasks
+      .map((task) => {
+        const taskText = normalizeMatchText(
+          [
+            task.task_name,
+            task.zone_area,
+            task.level,
+            task.package,
+            task.contract,
+            task.task_type,
+          ]
+            .filter(Boolean)
+            .join(' ')
+        );
+
+        let score = 0;
+
+        sourceWords.forEach((word) => {
+          if (taskText.includes(word)) {
+            score += word.length >= 6 ? 2 : 1;
+          }
+        });
+
+        if (
+          doc.detected_document_type &&
+          task.package &&
+          normalizeMatchText(task.package).includes(normalizeMatchText(doc.detected_document_type))
+        ) {
+          score += 3;
+        }
+
+        return {
+          ...task,
+          _matchScore: score,
+        };
+      })
+      .filter((task) => task._matchScore > 0)
+      .sort((a, b) => b._matchScore - a._matchScore)
+      .slice(0, 3);
+  };
+
   const getTaskVariance = (task) => getTaskActual(task) - getTaskPlanned(task);
   const completedTasks = tasks.filter(t => t.status === 'complete').length;
   const taskProgress = tasks.length > 0 ? (completedTasks / tasks.length) * 100 : 0;
@@ -689,6 +961,10 @@ export default function JobDetailPage() {
             <ListTodo className="h-4 w-4" />
             Tasks ({tasks.length})
           </TabsTrigger>
+          <TabsTrigger value="documents" className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Documents ({documents.length})
+          </TabsTrigger>
           <TabsTrigger value="programme" className="flex items-center gap-2">            <Calendar className="h-4 w-4" />            Programme ({programme.length})          </TabsTrigger>          <TabsTrigger value="codes" className="flex items-center gap-2">
             <ClipboardList className="h-4 w-4" />
             Task Codes ({taskCodes.length})
@@ -698,6 +974,215 @@ export default function JobDetailPage() {
             Delays ({delays.filter(d => !d.resolved).length})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="documents" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Document Intake + Review</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {canManage() && (
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                    <Input type="file" multiple onChange={handleUploadDocuments} />
+                    <Button onClick={handleAnalyzeDocuments} disabled={analyzingDocs || uploadingDocs}>
+                      {analyzingDocs ? 'Analyzing...' : 'Analyze Documents'}
+                    </Button>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Latest analysis: {job?.latest_analysis_status || analysis?.status || 'Not run'}
+                  </div>
+                </div>
+              )}
+
+              {documents.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No documents uploaded yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {documents.map((doc) => (
+                    <Card key={doc.id}>
+                      <CardContent className="pt-4 space-y-2">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="font-medium">
+                              {doc.original_filename || doc.filename || doc.name || 'Document'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Uploaded {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleString() : '-'}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline">{doc.parse_status || 'unknown'}</Badge>
+                            {doc.reference_only && <Badge variant="secondary">Reference only</Badge>}
+                            {doc.needs_review && <Badge variant="destructive">Needs review</Badge>}
+                            {doc.detected_document_type && (
+                              <Badge variant="outline">{doc.detected_document_type}</Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {canManage() && (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateDocumentReview(doc.id, { needs_review: false })}
+                            >
+                              Mark Reviewed
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateDocumentReview(doc.id, { reference_only: !doc.reference_only })}
+                            >
+                              {doc.reference_only ? 'Unset Reference Only' : 'Set Reference Only'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateDocumentReview(doc.id, { use_for_programme: !doc.use_for_programme })}
+                            >
+                              {doc.use_for_programme ? 'Unset Programme Use' : 'Use for Programme'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateDocumentReview(doc.id, { use_for_scope: !doc.use_for_scope })}
+                            >
+                              {doc.use_for_scope ? 'Unset Scope Use' : 'Use for Scope'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const nextType = window.prompt('Document type', doc.detected_document_type || '');
+                                if (nextType !== null) {
+                                  handleUpdateDocumentReview(doc.id, { detected_document_type: nextType || null });
+                                }
+                              }}
+                            >
+                              Set Type
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const nextNotes = window.prompt('Mapping notes', doc.mapping_notes || '');
+                                if (nextNotes !== null) {
+                                  handleUpdateDocumentReview(doc.id, { mapping_notes: nextNotes || null });
+                                }
+                              }}
+                            >
+                              Add Mapping Note
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openDocumentActionDialog(doc)}
+                            >
+                              Link to Task
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openDocumentActionDialog(doc)}
+                            >
+                              Create Proposed Task
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        </div>
+
+                        {Array.isArray(doc.warnings) && doc.warnings.length > 0 && (
+                          <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3">
+                            <div className="text-xs font-medium text-yellow-800 mb-1">Warnings</div>
+                            <ul className="text-xs text-yellow-700 space-y-1 list-disc pl-4">
+                              {doc.warnings.map((warning, index) => (
+                                <li key={`${doc.id}-warning-${index}`}>{warning}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">OCR:</span>{' '}
+                            <span>{doc.ocr_status || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Review:</span>{' '}
+                            <span>{doc.needs_review ? 'Pending' : 'Reviewed'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Use:</span>{' '}
+                            <span>{doc.reference_only ? 'Reference only' : 'Programme / scope candidate'}</span>
+                          </div>
+                        </div>
+
+                        {tasks.filter(task => (task.linked_file_ids || []).includes(doc.id)).length > 0 && (
+                          <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">
+                              Linked to Tasks
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {tasks
+                                .filter(task => (task.linked_file_ids || []).includes(doc.id))
+                                .map(task => (
+                                  <div key={`${doc.id}-linked-${task.id}`} className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openTaskDetail(task)}
+                                    >
+                                      Open Task: {task.task_name}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleUnlinkDocumentFromTask(task.id, doc.id)}
+                                    >
+                                      Unlink Task
+                                    </Button>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {getSuggestedTasksForDocument(doc).length > 0 && (
+                          <div className="rounded-md border bg-muted/30 p-3">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">
+                              Suggested Matches
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {getSuggestedTasksForDocument(doc).map((task) => (
+                                <Button
+                                  key={`${doc.id}-suggested-${task.id}`}
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleLinkDocumentToTask(doc.id, task.id)}
+                                >
+                                  {task.task_name}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="programme" className="space-y-4">
           {canManage() && programme.length > 0 && (
@@ -1069,7 +1554,144 @@ export default function JobDetailPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-4 items-center gap-4">
+              
+
+                <div className="col-span-4 pt-2">
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <div>
+                      <h4 className="font-medium">Planning Controls</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Live planning fields for status, gain, interface, and reporting
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <Label>Level</Label>
+                        <Input
+                          value={taskForm.level}
+                          onChange={(e) => setTaskForm({ ...taskForm, level: e.target.value })}
+                          placeholder="e.g. L4"
+                        />
+                      </div>
+
+                      <div>
+                        <Label>Package</Label>
+                        <Input
+                          value={taskForm.package}
+                          onChange={(e) => setTaskForm({ ...taskForm, package: e.target.value })}
+                          placeholder="e.g. Steel Stud Partitions"
+                        />
+                      </div>
+
+                      <div>
+                        <Label>Contract</Label>
+                        <Input
+                          value={taskForm.contract}
+                          onChange={(e) => setTaskForm({ ...taskForm, contract: e.target.value })}
+                          placeholder="e.g. Fitout"
+                        />
+                      </div>
+
+                      <div>
+                        <Label>RAG Status</Label>
+                        <Select
+                          value={taskForm.rag_status || "none"}
+                          onValueChange={(value) => setTaskForm({ ...taskForm, rag_status: value === "none" ? "" : value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">None</SelectItem>
+                            <SelectItem value="green">Green</SelectItem>
+                            <SelectItem value="amber">Amber</SelectItem>
+                            <SelectItem value="red">Red</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <Label>Earliest Possible Start</Label>
+                        <Input
+                          type="date"
+                          value={taskForm.earliest_possible_start}
+                          onChange={(e) => setTaskForm({ ...taskForm, earliest_possible_start: e.target.value })}
+                        />
+                      </div>
+
+                      <div>
+                        <Label>Manual Start Override</Label>
+                        <Input
+                          type="date"
+                          value={taskForm.manual_start_override}
+                          onChange={(e) => setTaskForm({ ...taskForm, manual_start_override: e.target.value })}
+                        />
+                      </div>
+
+                      <div>
+                        <Label>Rounded Crew</Label>
+                        <Input
+                          type="number"
+                          value={taskForm.rounded_crew}
+                          onChange={(e) => setTaskForm({ ...taskForm, rounded_crew: e.target.value })}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="flex items-end gap-2 pb-2">
+                        <Checkbox
+                          checked={!!taskForm.is_long_lead}
+                          onCheckedChange={(checked) => setTaskForm({ ...taskForm, is_long_lead: !!checked })}
+                        />
+                        <span className="text-sm text-muted-foreground">Long lead item</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label>Interface Prompt</Label>
+                      <Textarea
+                        value={taskForm.interface_prompt}
+                        onChange={(e) => setTaskForm({ ...taskForm, interface_prompt: e.target.value })}
+                        placeholder="e.g. Builder area release, mechanical rough-in complete, ceiling support confirmed"
+                        rows={2}
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Hold Point</Label>
+                      <Textarea
+                        value={taskForm.hold_point}
+                        onChange={(e) => setTaskForm({ ...taskForm, hold_point: e.target.value })}
+                        placeholder="e.g. Inspection required before close-up"
+                        rows={2}
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Gain Note</Label>
+                      <Textarea
+                        value={taskForm.gain_note}
+                        onChange={(e) => setTaskForm({ ...taskForm, gain_note: e.target.value })}
+                        placeholder="e.g. Can pull forward if release achieved early"
+                        rows={2}
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Snapshot Note</Label>
+                      <Textarea
+                        value={taskForm.snapshot_note}
+                        onChange={(e) => setTaskForm({ ...taskForm, snapshot_note: e.target.value })}
+                        placeholder="Short status note for reports and snapshots"
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                </div>
+<div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Start Date</Label>
                 <Input
                   type="date"
@@ -1255,6 +1877,146 @@ export default function JobDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={documentActionDialogOpen}
+        onOpenChange={(open) => {
+          setDocumentActionDialogOpen(open);
+          if (!open) {
+            setActiveDocument(null);
+            setDocumentTaskSearch('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Review document task action</DialogTitle>
+            <DialogDescription>
+              Choose an existing task from a visible list, or create a proposed task from this document.
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeDocument && (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <div className="font-medium text-sm">
+                  {activeDocument.original_filename || activeDocument.filename || activeDocument.name || 'Document'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {activeDocument.detected_document_type || 'No document type set'}
+                </div>
+                {activeDocument.mapping_notes && (
+                  <div className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap">
+                    {activeDocument.mapping_notes}
+                  </div>
+                )}
+              </div>
+
+              {getSuggestedTasksForDocument(activeDocument).length > 0 && (
+                <div className="space-y-2">
+                  <Label>Suggested matches</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {getSuggestedTasksForDocument(activeDocument).map((task) => (
+                      <Button
+                        key={`dialog-suggested-${task.id}`}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleLinkDocumentToTask(activeDocument.id, task.id)}
+                      >
+                        {task.task_name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Find existing task</Label>
+                <Input
+                  value={documentTaskSearch}
+                  onChange={(e) => setDocumentTaskSearch(e.target.value)}
+                  placeholder="Search by task name, level, package, contract, or area"
+                />
+              </div>
+
+              <div className="max-h-80 overflow-y-auto rounded-lg border p-2 space-y-2">
+                {tasks
+                  .filter((task) => {
+                    const needle = documentTaskSearch.trim().toLowerCase();
+                    if (!needle) return true;
+
+                    return [
+                      task.task_name,
+                      task.level,
+                      task.package,
+                      task.contract,
+                      task.zone_area
+                    ]
+                      .filter(Boolean)
+                      .some((value) => String(value).toLowerCase().includes(needle));
+                  })
+                  .slice(0, 20)
+                  .map((task) => (
+                    <div key={`document-link-${task.id}`} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm">{task.task_name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[task.level, task.package, task.contract, task.zone_area].filter(Boolean).join(' • ') || task.id}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleLinkDocumentToTask(activeDocument.id, task.id)}
+                      >
+                        Link
+                      </Button>
+                    </div>
+                  ))}
+
+                {tasks.filter((task) => {
+                  const needle = documentTaskSearch.trim().toLowerCase();
+                  if (!needle) return true;
+
+                  return [
+                    task.task_name,
+                    task.level,
+                    task.package,
+                    task.contract,
+                    task.zone_area
+                  ]
+                    .filter(Boolean)
+                    .some((value) => String(value).toLowerCase().includes(needle));
+                }).length === 0 && (
+                  <div className="text-sm text-muted-foreground p-2">
+                    No matching tasks found.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDocumentActionDialogOpen(false);
+                setActiveDocument(null);
+                setDocumentTaskSearch('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => activeDocument && handleCreateTaskFromDocument(activeDocument)}
+            >
+              Create Proposed Task
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Task Detail Sheet */}
       <Sheet open={!!selectedTask} onOpenChange={(open) => !open && closeTaskDetail()}>
@@ -1318,7 +2080,83 @@ export default function JobDetailPage() {
                     <p className="text-sm text-muted-foreground">Progress</p>
                     <p className="font-medium">{selectedTask.percent_complete}%</p>
                   </div>
+
+                  <div>
+                    <p className="text-sm text-muted-foreground">Level</p>
+                    <p className="font-medium">{selectedTask.level || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Package</p>
+                    <p className="font-medium">{selectedTask.package || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Contract</p>
+                    <p className="font-medium">{selectedTask.contract || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">RAG</p>
+                    <p className="font-medium">{selectedTask.rag_status || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Rounded Crew</p>
+                    <p className="font-medium">{selectedTask.rounded_crew || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Long Lead</p>
+                    <p className="font-medium">{selectedTask.is_long_lead ? 'Yes' : 'No'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-sm text-muted-foreground">Interface Prompt</p>
+                    <p className="font-medium whitespace-pre-wrap">{selectedTask.interface_prompt || '-'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-sm text-muted-foreground">Hold Point</p>
+                    <p className="font-medium whitespace-pre-wrap">{selectedTask.hold_point || '-'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-sm text-muted-foreground">Gain Note</p>
+                    <p className="font-medium whitespace-pre-wrap">{selectedTask.gain_note || '-'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-sm text-muted-foreground">Snapshot Note</p>
+                    <p className="font-medium whitespace-pre-wrap">{selectedTask.snapshot_note || '-'}</p>
+                  </div>
+
                 </div>
+
+                {selectedTask.linked_file_ids?.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">Linked Documents</h4>
+                    <div className="space-y-2">
+                      {selectedTask.linked_file_ids.map(fileId => {
+                        const doc = documents.find(d => d.id === fileId);
+                        return (
+                          <div key={fileId} className="rounded-md border p-3">
+                            <div className="font-medium text-sm">
+                              {doc ? (doc.original_filename || doc.filename || doc.name || fileId) : fileId}
+                            </div>
+                            {doc && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUnlinkDocumentFromTask(selectedTask.id, fileId)}
+                                >
+                                  Unlink Document
+                                </Button>
+                                <Badge variant="outline">{doc.parse_status || 'unknown'}</Badge>
+                                {doc.reference_only && <Badge variant="secondary">Reference only</Badge>}
+                                {doc.use_for_programme && <Badge variant="outline">Programme Use</Badge>}
+                                {doc.use_for_scope && <Badge variant="outline">Scope Use</Badge>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Linked Task Codes */}
                 {selectedTask.linked_task_codes?.length > 0 && (
@@ -1690,6 +2528,12 @@ export default function JobDetailPage() {
     </div>
   );
 }
+
+
+
+
+
+
 
 
 
