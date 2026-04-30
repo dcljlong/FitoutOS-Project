@@ -1124,65 +1124,83 @@ const fetchTaskMaterials = async (taskId) => {
                         </div>
 
                         {canManage() && (
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateDocumentReview(doc.id, { needs_review: false })}
-                            >
-                              Mark Reviewed
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateDocumentReview(doc.id, { reference_only: !doc.reference_only })}
-                            >
-                              {doc.reference_only ? 'Unset Reference Only' : 'Set Reference Only'}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateDocumentReview(doc.id, { use_for_programme: !doc.use_for_programme })}
-                            >
-                              {doc.use_for_programme ? 'Unset Programme Use' : 'Use for Programme'}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateDocumentReview(doc.id, { use_for_scope: !doc.use_for_scope })}
-                            >
-                              {doc.use_for_scope ? 'Unset Scope Use' : 'Use for Scope'}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openDocumentReviewEditDialog(doc, 'type')}
-                            >
-                              Set Type
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openDocumentReviewEditDialog(doc, 'notes')}
-                            >
-                              Add Mapping Note
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openDocumentActionDialog(doc)}
-                            >
-                              Link to Task
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openDocumentActionDialog(doc)}
-                            >
-                              Create Proposed Task
-                            </Button>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <div className="rounded-md border p-3 space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground">1. Review step</div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUpdateDocumentReview(doc.id, { needs_review: false })}
+                                >
+                                  Mark Reviewed
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUpdateDocumentReview(doc.id, { reference_only: !doc.reference_only })}
+                                >
+                                  {doc.reference_only ? 'Unset Reference Only' : 'Set Reference Only'}
+                                </Button>
+                              </div>
+                            </div>
+
+                            <div className="rounded-md border p-3 space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground">2. Classify use</div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUpdateDocumentReview(doc.id, { use_for_programme: !doc.use_for_programme })}
+                                >
+                                  {doc.use_for_programme ? 'Unset Programme Use' : 'Use for Programme'}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUpdateDocumentReview(doc.id, { use_for_scope: !doc.use_for_scope })}
+                                >
+                                  {doc.use_for_scope ? 'Unset Scope Use' : 'Use for Scope'}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openDocumentReviewEditDialog(doc, 'type')}
+                                >
+                                  Set Type
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openDocumentReviewEditDialog(doc, 'notes')}
+                                >
+                                  Add Mapping Note
+                                </Button>
+                              </div>
+                            </div>
+
+                            <div className="rounded-md border p-3 space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground">3. Link / create task</div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openDocumentActionDialog(doc)}
+                                >
+                                  Link to Task
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openDocumentActionDialog(doc)}
+                                >
+                                  Create Proposed Task
+                                </Button>
+                              </div>
+                            </div>
                           </div>
                         )}
+
 
                         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                         </div>
