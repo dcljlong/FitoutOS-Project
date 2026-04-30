@@ -4886,6 +4886,33 @@ async def get_job_files(job_id: str, user: dict = Depends(get_current_user)):
     return files
 
 
+@api_router.put("/jobs/{job_id}/files/{file_id}/review")
+async def update_job_file_review_active(
+    job_id: str,
+    file_id: str,
+    review_data: FileReviewUpdate,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    file_record = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    update_data = {k: v for k, v in review_data.model_dump().items() if v is not None}
+    if not update_data:
+        return file_record
+
+    update_data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["reviewed_by"] = user["id"]
+
+    await db.job_files.update_one(
+        {"job_id": job_id, "id": file_id},
+        {"$set": update_data}
+    )
+
+    updated = await db.job_files.find_one({"job_id": job_id, "id": file_id}, {"_id": 0})
+    return updated
+
+
 @api_router.post("/jobs/{job_id}/parse-programme")
 async def parse_job_programme_file(
     job_id: str,

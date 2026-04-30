@@ -156,7 +156,11 @@ export default function JobDetailPage() {
   const [documentActionDialogOpen, setDocumentActionDialogOpen] = useState(false);
   const [activeDocument, setActiveDocument] = useState(null);
   const [documentTaskSearch, setDocumentTaskSearch] = useState('');
-  const [pendingDocumentTask, setPendingDocumentTask] = useState(null);  
+  const [pendingDocumentTask, setPendingDocumentTask] = useState(null);
+  const [documentReviewEditDialogOpen, setDocumentReviewEditDialogOpen] = useState(false);
+  const [documentReviewEditMode, setDocumentReviewEditMode] = useState('type');
+  const [documentReviewEditForm, setDocumentReviewEditForm] = useState({ value: '' });
+  const [savingDocumentReviewEdit, setSavingDocumentReviewEdit] = useState(false);
   // Material dialog state
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [savingMaterial, setSavingMaterial] = useState(false);
@@ -272,8 +276,10 @@ export default function JobDetailPage() {
       const response = await api.put(`/jobs/${jobId}/files/${fileId}/review`, payload);
       setDocuments((prev) => prev.map((doc) => (doc.id === fileId ? response.data : doc)));
       toast.success('Document review updated');
+      return response.data;
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to update document review');
+      return null;
     }
   };
 
@@ -281,6 +287,41 @@ export default function JobDetailPage() {
     setActiveDocument(doc);
     setDocumentTaskSearch('');
     setDocumentActionDialogOpen(true);
+  };
+
+  const openDocumentReviewEditDialog = (doc, mode) => {
+    setActiveDocument(doc);
+    setDocumentReviewEditMode(mode);
+    setDocumentReviewEditForm({
+      value: mode === 'type' ? doc.detected_document_type || '' : doc.mapping_notes || '',
+    });
+    setDocumentReviewEditDialogOpen(true);
+  };
+
+  const closeDocumentReviewEditDialog = () => {
+    setDocumentReviewEditDialogOpen(false);
+    setActiveDocument(null);
+    setDocumentReviewEditForm({ value: '' });
+  };
+
+  const handleSaveDocumentReviewEdit = async () => {
+    if (!activeDocument) return;
+
+    setSavingDocumentReviewEdit(true);
+    try {
+      const cleanValue = documentReviewEditForm.value.trim();
+      const payload =
+        documentReviewEditMode === 'type'
+          ? { detected_document_type: cleanValue || null }
+          : { mapping_notes: cleanValue || null };
+
+      const updatedDocument = await handleUpdateDocumentReview(activeDocument.id, payload);
+      if (updatedDocument) {
+        closeDocumentReviewEditDialog();
+      }
+    } finally {
+      setSavingDocumentReviewEdit(false);
+    }
   };
 
   const handleLinkDocumentToTask = async (fileId, presetTaskId = null) => {
@@ -1056,24 +1097,14 @@ const fetchTaskMaterials = async (taskId) => {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                const nextType = window.prompt('Document type', doc.detected_document_type || '');
-                                if (nextType !== null) {
-                                  handleUpdateDocumentReview(doc.id, { detected_document_type: nextType || null });
-                                }
-                              }}
+                              onClick={() => openDocumentReviewEditDialog(doc, 'type')}
                             >
                               Set Type
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                const nextNotes = window.prompt('Mapping notes', doc.mapping_notes || '');
-                                if (nextNotes !== null) {
-                                  handleUpdateDocumentReview(doc.id, { mapping_notes: nextNotes || null });
-                                }
-                              }}
+                              onClick={() => openDocumentReviewEditDialog(doc, 'notes')}
                             >
                               Add Mapping Note
                             </Button>
@@ -1875,6 +1906,81 @@ const fetchTaskMaterials = async (taskId) => {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={documentReviewEditDialogOpen}
+        onOpenChange={(open) => {
+          setDocumentReviewEditDialogOpen(open);
+          if (!open) {
+            setActiveDocument(null);
+            setDocumentReviewEditForm({ value: '' });
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {documentReviewEditMode === 'type' ? 'Set document type' : 'Add mapping note'}
+            </DialogTitle>
+            <DialogDescription>
+              Update the document review metadata without leaving the Documents workflow.
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeDocument && (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <div className="font-medium text-sm">
+                  {activeDocument.original_filename || activeDocument.filename || activeDocument.name || 'Document'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Current type: {activeDocument.detected_document_type || 'Not set'}
+                </div>
+              </div>
+
+              {documentReviewEditMode === 'type' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="document-review-type">Document type</Label>
+                  <Input
+                    id="document-review-type"
+                    value={documentReviewEditForm.value}
+                    onChange={(event) => setDocumentReviewEditForm({ value: event.target.value })}
+                    placeholder="e.g. Programme, Scope, Drawing, RFI, Variation"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="document-review-notes">Mapping notes</Label>
+                  <Textarea
+                    id="document-review-notes"
+                    value={documentReviewEditForm.value}
+                    onChange={(event) => setDocumentReviewEditForm({ value: event.target.value })}
+                    rows={5}
+                    placeholder="Add notes about floor, package, scope, risk, or suggested task mapping."
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closeDocumentReviewEditDialog}
+              disabled={savingDocumentReviewEdit}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveDocumentReviewEdit}
+              disabled={savingDocumentReviewEdit || !activeDocument}
+            >
+              {savingDocumentReviewEdit ? 'Saving...' : 'Save Review Detail'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog
