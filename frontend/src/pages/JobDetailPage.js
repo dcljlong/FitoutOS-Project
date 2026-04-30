@@ -759,6 +759,44 @@ const fetchTaskMaterials = async (taskId) => {
       .slice(0, 3);
   };
 
+  const isDocumentLinkedToTask = (doc) =>
+    tasks.some((task) => (task.linked_file_ids || []).includes(doc.id));
+
+  const getDocumentWorkflowStatus = (doc) => {
+    if (doc.needs_review) return 'Review Queue';
+    if (isDocumentLinkedToTask(doc)) return 'Linked';
+    return 'Ready / Reviewed';
+  };
+
+  const getDocumentWorkflowRank = (doc) => {
+    if (doc.needs_review) return 0;
+    if (isDocumentLinkedToTask(doc)) return 2;
+    return 1;
+  };
+
+  const documentWorkflowCounts = documents.reduce(
+    (acc, doc) => {
+      if (doc.needs_review) {
+        acc.reviewQueue += 1;
+      } else if (isDocumentLinkedToTask(doc)) {
+        acc.linked += 1;
+      } else {
+        acc.ready += 1;
+      }
+      return acc;
+    },
+    { reviewQueue: 0, ready: 0, linked: 0 }
+  );
+
+  const orderedDocuments = [...documents].sort((a, b) => {
+    const rankDiff = getDocumentWorkflowRank(a) - getDocumentWorkflowRank(b);
+    if (rankDiff !== 0) return rankDiff;
+
+    const aTime = a.uploaded_at ? new Date(a.uploaded_at).getTime() : 0;
+    const bTime = b.uploaded_at ? new Date(b.uploaded_at).getTime() : 0;
+    return bTime - aTime;
+  });
+
   const getTaskVariance = (task) => getTaskActual(task) - getTaskPlanned(task);
   const completedTasks = tasks.filter(t => t.status === 'complete').length;
   const taskProgress = tasks.length > 0 ? (completedTasks / tasks.length) * 100 : 0;
@@ -1036,13 +1074,33 @@ const fetchTaskMaterials = async (taskId) => {
                 </div>
               )}
 
+              {documents.length > 0 && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Review Queue</div>
+                    <div className="text-2xl font-semibold">{documentWorkflowCounts.reviewQueue}</div>
+                    <div className="text-xs text-muted-foreground">Needs review or decision</div>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Ready / Reviewed</div>
+                    <div className="text-2xl font-semibold">{documentWorkflowCounts.ready}</div>
+                    <div className="text-xs text-muted-foreground">Reviewed but not linked yet</div>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Linked</div>
+                    <div className="text-2xl font-semibold">{documentWorkflowCounts.linked}</div>
+                    <div className="text-xs text-muted-foreground">Connected to task control</div>
+                  </div>
+                </div>
+              )}
+
               {documents.length === 0 ? (
                 <div className="text-sm text-muted-foreground">
                   No documents uploaded yet.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {documents.map((doc) => (
+                  {orderedDocuments.map((doc) => (
                     <Card key={doc.id}>
                       <CardContent className="pt-4 space-y-2">
                         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -1061,6 +1119,7 @@ const fetchTaskMaterials = async (taskId) => {
                             {doc.detected_document_type && (
                               <Badge variant="outline">{doc.detected_document_type}</Badge>
                             )}
+                            <Badge variant="secondary">{getDocumentWorkflowStatus(doc)}</Badge>
                           </div>
                         </div>
 
