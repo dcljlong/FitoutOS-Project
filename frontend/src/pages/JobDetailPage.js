@@ -353,7 +353,8 @@ export default function JobDetailPage() {
         (task) => (task.linked_file_ids || []).includes(fileId)
       );
 
-      if (!stillLinkedElsewhere) {
+      const fileRecord = documents.find((doc) => doc.id === fileId);
+      if (!stillLinkedElsewhere && !fileRecord?.reference_only) {
         await handleUpdateDocumentReview(fileId, { needs_review: true });
       }
 
@@ -763,29 +764,33 @@ const fetchTaskMaterials = async (taskId) => {
     tasks.some((task) => (task.linked_file_ids || []).includes(doc.id));
 
   const getDocumentWorkflowStatus = (doc) => {
-    if (doc.needs_review) return 'Review Queue';
     if (isDocumentLinkedToTask(doc)) return 'Linked';
+    if (doc.reference_only) return 'Reference Only';
+    if (doc.needs_review) return 'Review Queue';
     return 'Ready / Reviewed';
   };
 
   const getDocumentWorkflowRank = (doc) => {
-    if (doc.needs_review) return 0;
+    if (doc.needs_review && !doc.reference_only && !isDocumentLinkedToTask(doc)) return 0;
     if (isDocumentLinkedToTask(doc)) return 2;
+    if (doc.reference_only) return 3;
     return 1;
   };
 
   const documentWorkflowCounts = documents.reduce(
     (acc, doc) => {
-      if (doc.needs_review) {
-        acc.reviewQueue += 1;
-      } else if (isDocumentLinkedToTask(doc)) {
+      if (isDocumentLinkedToTask(doc)) {
         acc.linked += 1;
+      } else if (doc.reference_only) {
+        acc.referenceOnly += 1;
+      } else if (doc.needs_review) {
+        acc.reviewQueue += 1;
       } else {
         acc.ready += 1;
       }
       return acc;
     },
-    { reviewQueue: 0, ready: 0, linked: 0 }
+    { reviewQueue: 0, ready: 0, linked: 0, referenceOnly: 0 }
   );
 
   const orderedDocuments = [...documents].sort((a, b) => {
@@ -1075,7 +1080,7 @@ const fetchTaskMaterials = async (taskId) => {
               )}
 
               {documents.length > 0 && (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                   <div className="rounded-lg border p-3">
                     <div className="text-xs font-medium text-muted-foreground">Review Queue</div>
                     <div className="text-2xl font-semibold">{documentWorkflowCounts.reviewQueue}</div>
@@ -1090,6 +1095,11 @@ const fetchTaskMaterials = async (taskId) => {
                     <div className="text-xs font-medium text-muted-foreground">Linked</div>
                     <div className="text-2xl font-semibold">{documentWorkflowCounts.linked}</div>
                     <div className="text-xs text-muted-foreground">Connected to task control</div>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Reference Only</div>
+                    <div className="text-2xl font-semibold">{documentWorkflowCounts.referenceOnly}</div>
+                    <div className="text-xs text-muted-foreground">Stored for record, no task link needed</div>
                   </div>
                 </div>
               )}
@@ -1138,7 +1148,12 @@ const fetchTaskMaterials = async (taskId) => {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleUpdateDocumentReview(doc.id, { reference_only: !doc.reference_only })}
+                                  onClick={() => handleUpdateDocumentReview(doc.id, {
+                                    reference_only: !doc.reference_only,
+                                    needs_review: doc.reference_only,
+                                    use_for_programme: doc.reference_only ? doc.use_for_programme : false,
+                                    use_for_scope: doc.reference_only ? doc.use_for_scope : false,
+                                  })}
                                 >
                                   {doc.reference_only ? 'Unset Reference Only' : 'Set Reference Only'}
                                 </Button>

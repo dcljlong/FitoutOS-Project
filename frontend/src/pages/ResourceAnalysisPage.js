@@ -139,9 +139,9 @@ export default function ResourceAnalysisPage() {
             <h1 className="text-3xl font-bold font-['Manrope']">Resource Analysis</h1>
             <p className="text-muted-foreground mt-1">A valid job is required.</p>
           </div>
-          <Button variant="outline" onClick={() => navigate("/jobs")}>
+          <Button variant="outline" onClick={() => jobId ? navigate(`/jobs/${jobId}`) : navigate("/jobs")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Jobs
+            Previous
           </Button>
         </div>
 
@@ -163,9 +163,9 @@ export default function ResourceAnalysisPage() {
             <h1 className="text-3xl font-bold font-['Manrope']">Resource Analysis</h1>
             <p className="text-muted-foreground mt-1">Job not found.</p>
           </div>
-          <Button variant="outline" onClick={() => navigate("/jobs")}>
+          <Button variant="outline" onClick={() => jobId ? navigate(`/jobs/${jobId}`) : navigate("/jobs")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Jobs
+            Previous
           </Button>
         </div>
 
@@ -188,10 +188,10 @@ export default function ResourceAnalysisPage() {
             <p className="text-muted-foreground mt-1">Daily labour load timeline</p>
           </div>
           <div className="flex gap-2">
-            <Link to="/jobs">
+            <Link to={jobId ? `/jobs/${jobId}` : "/jobs"}>
               <Button variant="outline">
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Jobs
+                Previous
               </Button>
             </Link>
             <Button onClick={() => window.location.reload()}>
@@ -244,10 +244,10 @@ export default function ResourceAnalysisPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link to="/jobs">
+            <Link to={jobId ? `/jobs/${jobId}` : "/jobs"}>
               <Button variant="outline">
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Jobs
+                Previous
               </Button>
             </Link>
             <Link to={`/jobs/${jobId}`}>
@@ -303,10 +303,10 @@ export default function ResourceAnalysisPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/jobs">
+          <Link to={jobId ? `/jobs/${jobId}` : "/jobs"}>
             <Button variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Jobs
+              Previous
             </Button>
           </Link>
           <div className={`inline-flex w-fit items-center rounded-md px-3 py-1.5 text-sm font-semibold ${statusClass(overallStatus)}`}>
@@ -600,5 +600,7 @@ export default function ResourceAnalysisPage() {
     </div>
   );
 }
+
+
 
 

@@ -90,6 +90,25 @@ export default function JobSetupPage() {
     }
   };
 
+  const handleDeleteJob = async () => {
+    const targetJobId = jobId || job?.id;
+    if (!targetJobId) return;
+
+    const confirmed = window.confirm('Delete this job and all related setup data? This cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      await api.delete(`/jobs/${targetJobId}`);
+      toast.success('Job deleted');
+      navigate('/jobs');
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Failed to delete job');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const { jobId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -281,47 +300,54 @@ try {
     accept: {},
   });
 
-  // Create job
+  // Create or update job
   const handleCreateJob = async () => {
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    const payload = {
-      job_number: (jobForm.job_number || '').trim(),
-      job_name: (jobForm.job_name || '').trim(),
-      main_contractor: (jobForm.main_contractor || '').trim() || null,
-      site_address: (jobForm.site_address || '').trim() || null,
-      planned_start: jobForm.planned_start || null,
-      planned_finish: jobForm.planned_finish || null,
-      max_crew: jobForm.max_crew === '' ? null : Number(jobForm.max_crew),
-      standard_crew: jobForm.standard_crew === '' ? null : Number(jobForm.standard_crew),
-      allow_saturday: !!jobForm.allow_saturday,
-      allow_overtime: !!jobForm.allow_overtime,
-    };
+      const payload = {
+        job_number: (jobForm.job_number || '').trim(),
+        job_name: (jobForm.job_name || '').trim(),
+        main_contractor: (jobForm.main_contractor || '').trim() || null,
+        site_address: (jobForm.site_address || '').trim() || null,
+        planned_start: jobForm.planned_start || null,
+        planned_finish: jobForm.planned_finish || null,
+        max_crew: jobForm.max_crew === '' ? null : Number(jobForm.max_crew),
+        standard_crew: jobForm.standard_crew === '' ? null : Number(jobForm.standard_crew),
+        allow_saturday: !!jobForm.allow_saturday,
+        allow_overtime: !!jobForm.allow_overtime,
+      };
 
-    const response = await api.post('/jobs', payload);
-    setJob(response.data);
+      const targetJobId = jobId || job?.id;
+      const isEditMode = !!targetJobId;
 
-try {
-  const codesRes = await api.get(`/jobs/${response.data.id}/task-codes`);
-  setJobTaskCodes(codesRes.data || []);
-} catch (e) {}
-    toast.success('Job created');
-    navigate(`/jobs/${response.data.id}/setup`);
-  } catch (error) {
-    const message =
-      error?.response?.data?.detail
-        ? (Array.isArray(error.response.data.detail)
-            ? error.response.data.detail.map(d => d.msg || JSON.stringify(d)).join(', ')
-            : String(error.response.data.detail))
-        : 'Failed to create job';
+      const response = isEditMode
+        ? await api.put(`/jobs/${targetJobId}`, payload)
+        : await api.post('/jobs', payload);
 
-    console.error('Create job failed:', error);
-    toast.error(message);
-  } finally {
-    setLoading(false);
-  }
-};
+      setJob(response.data);
+
+      try {
+        const codesRes = await api.get(`/jobs/${response.data.id}/task-codes`);
+        setJobTaskCodes(codesRes.data || []);
+      } catch (e) {}
+
+      toast.success(isEditMode ? 'Job updated' : 'Job created');
+      navigate(`/jobs/${response.data.id}/setup`);
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail
+          ? (Array.isArray(error.response.data.detail)
+              ? error.response.data.detail.map(d => d.msg || JSON.stringify(d)).join(', ')
+              : String(error.response.data.detail))
+          : (jobId || job?.id ? 'Failed to update job' : 'Failed to create job');
+
+      console.error('Save job failed:', error);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Run AI analysis
   const handleAnalyze = async () => {
@@ -586,10 +612,25 @@ try {
               </div>
             </div>
             
-            <div className="flex justify-end pt-4">
+            <div className="flex justify-between pt-4">
+              <div>
+                {(jobId || job?.id) && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDeleteJob}
+                    disabled={loading}
+                    data-testid="delete-job-btn"
+                  >
+                    {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Job
+                  </Button>
+                )}
+              </div>
               <Button onClick={handleCreateJob} disabled={loading} data-testid="create-job-btn">
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create Job & Continue
+                {jobId || job?.id ? 'Save Job & Continue' : 'Create Job & Continue'}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
@@ -602,7 +643,7 @@ try {
           <CardHeader>
             <CardTitle>Upload Documents</CardTitle>
             <CardDescription>
-              Upload your quote/scope Excel files and main contractor programme PDFs
+              Upload your quote/scope files and programme files (PDF, Excel, CSV, MPP)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -618,7 +659,7 @@ try {
                   {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  or click to browse (PDF, Excel, CSV)
+                  or click to browse (PDF, Excel, CSV, MPP)
                 </p>
               </div>
             </div>
@@ -673,12 +714,12 @@ try {
               Process Programme Files
             </CardTitle>
             <CardDescription>
-              Parse your Excel/CSV programme files or use AI to analyze all documents
+              Parse your Excel/CSV/MPP programme files or use AI to analyze all documents
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Programme File Parsing Option */}
-            {files.some(f => f.filename?.match(/\.(xlsx|xls|csv)$/i)) && (
+            {files.some(f => f.filename?.match(/\.(xlsx|xls|csv|mpp)$/i)) && (
               <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-6">
                 <div className="flex items-start gap-4">
                   <FileSpreadsheet className="h-10 w-10 text-green-600 flex-shrink-0" />
@@ -687,11 +728,11 @@ try {
                       Parse Programme File (Recommended)
                     </h3>
                     <p className="text-sm text-green-700 dark:text-green-300 mb-3">
-                      Directly parse your Excel/CSV programme file for accurate dates, tasks, and dependencies.
+                      Directly parse your Excel/CSV/MPP programme file for accurate dates, tasks, and dependencies.
                       Handles various formats including contractor exports.
                     </p>
                     <div className="space-y-2 mb-4">
-                      {files.filter(f => f.filename?.match(/\.(xlsx|xls|csv)$/i)).map((file, idx) => (
+                      {files.filter(f => f.filename?.match(/\.(xlsx|xls|csv|mpp)$/i)).map((file, idx) => (
                         <div key={idx} className="flex items-center gap-2 text-sm">
                           <FileSpreadsheet className="h-4 w-4 text-green-600" />
                           <span className="text-green-800 dark:text-green-200">{file.filename}</span>
@@ -876,7 +917,11 @@ try {
                           <div key={index} className="flex items-start gap-3 p-3 rounded-lg border">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="font-medium">{typeof item === "string" ? item : item.item}</span>
+                                <span className="font-medium break-words">
+                                  {typeof item === "string"
+                                    ? item
+                                    : (item.item || item.description || item.package || item.name || "Unnamed scope item")}
+                                </span>
                                 {typeof item === "object" && item.confidence ? <ConfidenceBadge level={item.confidence} /> : null}
                               </div>
                               {item.quantity && (
@@ -1219,6 +1264,8 @@ try {
     </div>
   );
 }
+
+
 
 
 

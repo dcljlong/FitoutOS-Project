@@ -87,9 +87,18 @@ export default function GanttPage() {
         };
       });
 
+      const rawProgramme = progRes.data || [];
+      const cleanedProgramme = rawProgramme.filter((row) => {
+        if (!row) return false;
+        if (row.source_format !== 'mpp') return true;
+        if (row.is_summary) return false;
+        if (row.is_milestone) return false;
+        return true;
+      });
+
       setJob(jobRes.data);
       setTasks(mergedTasks);
-      setProgramme(progRes.data);
+      setProgramme(cleanedProgramme);
       setAnalysisPayload(analysisData);
     } catch (error) {
       setAnalysisPayload(null);
@@ -233,7 +242,7 @@ export default function GanttPage() {
         
         <div className="flex items-center gap-2">
           <Badge variant="outline">
-            {tasks.length} Tasks
+            {tasks.length > 0 ? `${tasks.length} Tasks` : `${programme.length} Programme Items`}
           </Badge>
                       {analysisPayload?.summary?.tasks_overallocated > 0 && (
               <Badge variant="destructive">
@@ -311,7 +320,7 @@ export default function GanttPage() {
                     ))}
                     {tasks.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-4">
-                        No tasks found
+                        {programme.length > 0 ? 'No generated tasks yet. Showing imported programme only.' : 'No tasks found'}
                       </p>
                     )}
                   </div>
