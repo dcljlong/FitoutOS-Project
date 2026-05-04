@@ -9,7 +9,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Building2, Sun, Moon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+const getErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
 
+  if (typeof detail === 'string') return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item?.msg) return item.msg;
+        if (item?.message) return item.message;
+        return null;
+      })
+      .filter(Boolean);
+
+    return messages.length > 0 ? messages.join(' | ') : fallback;
+  }
+
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || fallback;
+  }
+
+  return error?.message || fallback;
+};
 export default function LoginPage() {
   const { login, register } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -31,7 +54,7 @@ export default function LoginPage() {
       await login(loginForm.email, loginForm.password);
       toast.success('Welcome back!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Login failed');
+      toast.error(getErrorMessage(error, 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -48,7 +71,7 @@ export default function LoginPage() {
       await register(registerForm.name, registerForm.email, registerForm.password, registerForm.role);
       toast.success('Account created successfully!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Registration failed');
+      toast.error(getErrorMessage(error, 'Registration failed'));
     } finally {
       setLoading(false);
     }
