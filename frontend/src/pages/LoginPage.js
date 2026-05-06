@@ -87,12 +87,12 @@ export default function LoginPage() {
         className="absolute inset-0 bg-cover bg-center scale-[1.02]"
         style={{
           backgroundImage: `url(${loginBackground})`,
-          filter: 'saturate(1.1) contrast(1.04) brightness(1.05)'
+          filter: 'saturate(1.12) contrast(1.03) brightness(1.24)'
         }}
         aria-hidden="true"
       />
       <div
-        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.04),rgba(0,0,0,0.34)),linear-gradient(90deg,rgba(2,6,14,0.56),rgba(2,6,14,0.16),rgba(2,6,14,0.50))]"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02),rgba(0,0,0,0.20)),linear-gradient(90deg,rgba(2,6,14,0.42),rgba(2,6,14,0.10),rgba(2,6,14,0.36))]"
         aria-hidden="true"
       />
 
@@ -115,7 +115,7 @@ export default function LoginPage() {
             <img
               src={fitoutLogo}
               alt="FitoutOS logo"
-              className="mx-auto mt-3 h-32 w-32 object-contain drop-shadow-2xl"
+              className="mx-auto mt-3 h-40 w-40 object-contain drop-shadow-2xl"
             />
             <h1 className="mt-3 text-4xl font-black uppercase tracking-[0.08em] font-['Manrope']">
               FitoutOS
