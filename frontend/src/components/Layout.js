@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -30,6 +30,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import fitoutLogo from '../assets/fitoutos-logo.png';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'pm', 'project_manager', 'worker'] },
@@ -78,7 +79,7 @@ const Layout = () => {
           "h-16 flex items-center border-b border-border px-3",
           sidebarCollapsed && "md:justify-center md:px-2"
         )}>
-          <Building2 className="h-8 w-8 text-primary flex-shrink-0" />
+          <img src={fitoutLogo} alt="FitoutOS logo" className="h-9 w-9 object-contain flex-shrink-0" />
           {!sidebarCollapsed && (
             <span className="ml-3 text-xl font-bold font-['Manrope']">FitoutOS</span>
           )}
@@ -209,6 +210,3 @@ const Layout = () => {
 };
 
 export default Layout;
-
-
-
