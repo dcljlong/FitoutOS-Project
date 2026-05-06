@@ -45,6 +45,24 @@ const navItems = [
   { path: '/resource-analysis', label: 'Resource Analysis', icon: BarChart3, roles: ['admin', 'pm', 'project_manager'] },
 ];
 
+const suiteLinks = [
+  {
+    href: process.env.REACT_APP_LONG_LINE_DIARY_URL || 'http://localhost:3003/dashboard',
+    label: 'LLD',
+    description: 'Long Line Diary',
+  },
+  {
+    href: process.env.REACT_APP_TOOL_TRACKER_URL || 'http://localhost:3002/dashboard',
+    label: 'Tool Tracker',
+    description: 'Tool control',
+  },
+  {
+    href: process.env.REACT_APP_TIMESHEET_MANAGER_URL || 'http://localhost:3001/login',
+    label: 'Timesheet',
+    description: 'Labour and payroll',
+  },
+];
+
 const Layout = () => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -69,14 +87,14 @@ const Layout = () => {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 h-full bg-card border-r border-border z-50",
+          "fixed left-0 top-0 h-full bg-card border-r border-border z-50 flex flex-col",
           "transform transition-all duration-200 ease-in-out",
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           sidebarCollapsed ? "md:w-14" : "w-56"
         )}
       >
         <div className={cn(
-          "h-16 flex items-center border-b border-border px-3",
+          "h-16 flex-shrink-0 flex items-center border-b border-border px-3",
           sidebarCollapsed && "md:justify-center md:px-2"
         )}>
           <img src={fitoutLogo} alt="FitoutOS logo" className="h-9 w-9 object-contain flex-shrink-0" />
@@ -91,7 +109,7 @@ const Layout = () => {
           </button>
         </div>
 
-        <nav className="p-2 space-y-1 overflow-y-auto h-[calc(100vh-8rem)]">
+        <nav className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1 pb-3">
           {filteredNavItems.map((item) => (
             <NavLink
               key={item.path}
@@ -112,6 +130,48 @@ const Layout = () => {
             </NavLink>
           ))}
         </nav>
+
+        {!sidebarCollapsed && (
+          <div className="mx-2 mb-12 flex-shrink-0 border-t border-border pt-3">
+            <p className="px-3 pb-2 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Long Line Suite
+            </p>
+            <div className="space-y-1">
+              {suiteLinks.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  title={item.description}
+                  data-testid={`suite-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                >
+                  <Building2 className="h-4 w-4 flex-shrink-0" />
+                  <span>{item.label}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {sidebarCollapsed && (
+          <div className="hidden md:flex mx-2 mb-12 flex-shrink-0 border-t border-border pt-3 flex-col items-center gap-1">
+            {suiteLinks.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                title={item.label}
+                data-testid={`suite-collapsed-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+              >
+                <Building2 className="h-4 w-4" />
+              </a>
+            ))}
+          </div>
+        )}
 
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -172,6 +232,7 @@ const Layout = () => {
                     <p className="text-sm font-medium">{user?.name}</p>
                     <p className="text-xs text-muted-foreground">{user?.email}</p>
                   </div>
+
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={logout} className="text-destructive" data-testid="logout-btn">
                     <LogOut className="mr-2 h-4 w-4" />
