@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -90,18 +90,20 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4" data-testid="dashboard-page">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold font-['Manrope']">
-            Welcome back, {user?.name?.split(' ')[0]}
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-bold font-['Manrope'] leading-tight">
+            Dashboard
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Open a job and get to work
+          <p className="text-muted-foreground text-sm">
+            <span className="font-semibold text-foreground">Welcome back, {user?.name?.split(' ')[0]}</span>
+            <span className="mx-2 text-muted-foreground/60">-</span>
+            <span>Open a job and get to work</span>
           </p>
         </div>
 
         {canManage() && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 md:pt-1">
             <Link to="/jobs/new">
               <Button data-testid="new-job-btn">
                 <Plus className="mr-2 h-4 w-4" />
@@ -235,7 +237,7 @@ export default function DashboardPage() {
                             onClick={() => navigate(`/jobs/${jobRouteId}/programmes`)}
                             disabled={!jobRouteId}
                           >
-                            📊 Programmes
+                            Programmes
                           </Button>
 
                           <Button

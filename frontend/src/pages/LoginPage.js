@@ -87,12 +87,12 @@ export default function LoginPage() {
         className="absolute inset-0 bg-cover bg-center scale-[1.02]"
         style={{
           backgroundImage: `url(${loginBackground})`,
-          filter: 'saturate(1.12) contrast(1.03) brightness(1.24)'
+          filter: 'saturate(1.10) contrast(1.02) brightness(1.58)'
         }}
         aria-hidden="true"
       />
       <div
-        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02),rgba(0,0,0,0.20)),linear-gradient(90deg,rgba(2,6,14,0.42),rgba(2,6,14,0.10),rgba(2,6,14,0.36))]"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.00),rgba(0,0,0,0.08)),linear-gradient(90deg,rgba(2,6,14,0.18),rgba(2,6,14,0.02),rgba(2,6,14,0.16))]"
         aria-hidden="true"
       />
 

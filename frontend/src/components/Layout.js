@@ -237,31 +237,31 @@ const Layout = () => {
 
             <div className="fo-rail-user-block" data-testid="rail-user-name">
               <span className="fo-rail-user-name">{displayName}</span>
-              <span className="fo-rail-user-role">{roleLabel}</span>
+              <span className="fo-rail-user-role">FitoutOS</span>
             </div>
 
-            <div className="fo-rail-account-actions">
+            <div className="fo-rail-account-actions" aria-label="FitoutOS account actions">
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="fo-rail-theme-toggle"
+                className="fo-rail-theme-button"
                 data-testid="rail-theme-toggle"
                 aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
                 title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
               </button>
 
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={logout}
                 className="fo-rail-logout-button"
-                data-testid="rail-logout-btn"
+                data-testid="rail-logout-button"
               >
                 <LogOut className="h-4 w-4" />
                 <span>Logout</span>
-              </button>
+              </Button>
             </div>
           </div>
         </aside>
