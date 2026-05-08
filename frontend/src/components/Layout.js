@@ -17,9 +17,17 @@ import {
   Moon,
   LogOut,
   Building2,
+  BookOpen,
+  Clock3,
+  Wrench,
 } from 'lucide-react';
 import fitoutLogo from '../assets/fitoutos-logo.png';
 
+const SuiteIconMark = ({ icon: Icon }) => (
+  <span className="fo-suite-mini-mark" aria-hidden="true">
+    <Icon className="h-3.5 w-3.5" strokeWidth={2.35} />
+  </span>
+);
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'pm', 'project_manager', 'worker'] },
   { path: '/jobs', label: 'Jobs', icon: Briefcase, roles: ['admin', 'pm', 'project_manager', 'worker'] },
@@ -38,16 +46,19 @@ const suiteLinks = [
     href: process.env.REACT_APP_LONG_LINE_DIARY_URL || 'http://localhost:3003/dashboard',
     label: 'LLD',
     description: 'Long Line Diary / Site diary',
+    icon: BookOpen,
   },
   {
     href: process.env.REACT_APP_TOOL_TRACKER_URL || 'http://localhost:3002/dashboard',
     label: 'Tool Tracker',
     description: 'Tool control',
+    icon: Wrench,
   },
   {
     href: process.env.REACT_APP_TIMESHEET_MANAGER_URL || 'http://localhost:3001/login',
     label: 'Timesheet',
     description: 'Labour and payroll',
+    icon: Clock3,
   },
 ];
 
@@ -117,7 +128,7 @@ const Layout = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Building2 className="h-4 w-4" />
+                  <SuiteIconMark icon={item.icon} />
                   {item.label}
                 </a>
               ))}
@@ -225,7 +236,7 @@ const Layout = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Building2 className="h-4 w-4" />
+                  <SuiteIconMark icon={item.icon} />
                   <span>{item.label}</span>
                 </a>
               ))}
