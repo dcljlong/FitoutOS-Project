@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/button';
@@ -228,13 +228,13 @@ export default function LoginPage() {
                         value={registerForm.role}
                         onValueChange={(value) => setRegisterForm({ ...registerForm, role: value })}
                       >
-                        <SelectTrigger data-testid="register-role" className="bg-white/94 text-slate-950">
-                          <SelectValue placeholder="Select role" />
+                        <SelectTrigger data-testid="register-role" className="!bg-white !text-slate-950 border-white/90 focus:ring-amber-300 focus:border-amber-300">
+                          <SelectValue className="!text-slate-950" placeholder="Select role" />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="worker">Worker</SelectItem>
-                          <SelectItem value="pm">Project Manager</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
+                        <SelectContent className="bg-white text-slate-950 border-slate-200 shadow-xl">
+                          <SelectItem className="text-slate-950 focus:bg-amber-100 focus:text-slate-950" value="worker">Worker</SelectItem>
+                          <SelectItem className="text-slate-950 focus:bg-amber-100 focus:text-slate-950" value="pm">Project Manager</SelectItem>
+                          <SelectItem className="text-slate-950 focus:bg-amber-100 focus:text-slate-950" value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -288,3 +288,6 @@ export default function LoginPage() {
     </div>
   );
 }
+
+
+
