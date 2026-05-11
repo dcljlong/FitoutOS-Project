@@ -1,4 +1,4 @@
-﻿
+
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -823,14 +823,15 @@ def require_roles(*roles):
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    existing = await db.users.find_one({"email": user_data.email})
+    email = user_data.email.strip().lower()
+    existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = str(uuid.uuid4())
     user = {
         "id": user_id,
-        "email": user_data.email,
+        "email": email,
         "password": hash_password(user_data.password),
         "name": user_data.name,
         "role": user_data.role,
@@ -843,7 +844,7 @@ async def register(user_data: UserCreate):
         access_token=token,
         user=UserResponse(
             id=user_id,
-            email=user_data.email,
+            email=email,
             name=user_data.name,
             role=user_data.role,
             created_at=user["created_at"]
@@ -3517,14 +3518,15 @@ def require_roles(*roles):
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    existing = await db.users.find_one({"email": user_data.email})
+    email = user_data.email.strip().lower()
+    existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = str(uuid.uuid4())
     user = {
         "id": user_id,
-        "email": user_data.email,
+        "email": email,
         "password": hash_password(user_data.password),
         "name": user_data.name,
         "role": user_data.role,
@@ -3537,7 +3539,7 @@ async def register(user_data: UserCreate):
         access_token=token,
         user=UserResponse(
             id=user_id,
-            email=user_data.email,
+            email=email,
             name=user_data.name,
             role=user_data.role,
             created_at=user["created_at"]
