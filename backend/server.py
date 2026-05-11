@@ -1,4 +1,4 @@
-
+﻿
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -7376,6 +7376,59 @@ async def get_unmatched_labour(job_id: str):
         "rows": rows
     }
 
+
+# ============== ENV-CONTROLLED ADMIN SEED ==============
+
+@app.on_event("startup")
+async def seed_configured_admin():
+    """
+    Create or repair a configured admin account from Render env vars.
+
+    Required env vars:
+    - ADMIN_EMAIL
+    - ADMIN_PASSWORD
+
+    Optional:
+    - ADMIN_NAME
+
+    This is intentionally not exposed as an API endpoint.
+    """
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "")
+    admin_name = os.environ.get("ADMIN_NAME", "Admin").strip() or "Admin"
+
+    if not admin_email or not admin_password:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    existing = await db.users.find_one({"email": admin_email})
+
+    if existing is None:
+        admin_user = {
+            "id": str(uuid.uuid4()),
+            "email": admin_email,
+            "password": hash_password(admin_password),
+            "name": admin_name,
+            "role": UserRole.ADMIN,
+            "created_at": now
+        }
+        await db.users.insert_one(admin_user)
+        logging.info("Configured FitoutOS admin user created")
+        return
+
+    update_data = {
+        "email": admin_email,
+        "password": hash_password(admin_password),
+        "name": existing.get("name") or admin_name,
+        "role": UserRole.ADMIN,
+    }
+
+    await db.users.update_one(
+        {"_id": existing["_id"]},
+        {"$set": update_data}
+    )
+    logging.info("Configured FitoutOS admin user repaired")
+
 app.include_router(api_router)
 
 # CORS
@@ -7469,6 +7522,7 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
+
 
 
 
