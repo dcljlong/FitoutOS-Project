@@ -7379,6 +7379,44 @@ async def get_unmatched_labour(job_id: str):
     }
 
 
+
+# ============== USER ADMIN CLEANUP ==============
+
+@api_router.delete("/users/{user_id}")
+async def delete_user_account(user_id: str, user: dict = Depends(require_roles(UserRole.ADMIN))):
+    """
+    Delete a user account by id.
+
+    Safety:
+    - Admin only
+    - Cannot delete yourself
+    - Cannot delete the last remaining admin
+    """
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target.get("id") == user.get("id"):
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    if target.get("role") == UserRole.ADMIN:
+        admin_count = await db.users.count_documents({"role": UserRole.ADMIN})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last admin account")
+
+    result = await db.users.delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "message": "User deleted",
+        "deleted_user": {
+            "id": target.get("id"),
+            "email": target.get("email"),
+            "name": target.get("name"),
+            "role": target.get("role")
+        }
+    }
 # ============== ENV-CONTROLLED ADMIN SEED ==============
 
 @app.on_event("startup")
