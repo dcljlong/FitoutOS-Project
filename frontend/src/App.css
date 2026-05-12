@@ -1860,3 +1860,93 @@ html:not(.dark) .fo-main-content textarea {
     padding-bottom: 0.34rem !important;
   }
 }
+
+
+/* FITOUTOS / ACCOUNT FOOTER BASE ALIGNMENT V6D
+   Refined Long Line Suite rail footer standard:
+   - account block is the true bottom footer
+   - flexible blank space stays above account for future suite/nav items
+   - account card/theme/logout spacing remains compact and readable
+   - overrides earlier V6 fixed account margins
+*/
+@media (min-width: 1024px) {
+  .fo-desktop-brand-rail {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .fo-rail-nav,
+  .fo-rail-suite {
+    flex: 0 0 auto !important;
+  }
+
+  .fo-rail-account {
+    margin-top: auto !important;
+    padding-top: 0.62rem !important;
+    padding-bottom: 0.08rem !important;
+    border-top: 1px solid rgba(245, 190, 80, 0.18) !important;
+    flex: 0 0 auto !important;
+  }
+
+  .fo-rail-account .fo-rail-suite-title,
+  .fo-rail-account .fo-rail-section-title {
+    margin-bottom: 0.34rem !important;
+  }
+
+  .fo-rail-user-block {
+    padding: 0.34rem 0.72rem 0.42rem !important;
+    border-radius: 0.78rem !important;
+    border: 1px solid rgba(245, 190, 80, 0.22) !important;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.070), rgba(255, 255, 255, 0.035)) !important;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16) !important;
+  }
+
+  .fo-rail-user-name {
+    font-size: 0.82rem !important;
+    line-height: 1.08 !important;
+  }
+
+  .fo-rail-user-role {
+    margin-top: 0.12rem !important;
+    font-size: 0.64rem !important;
+    line-height: 1.05 !important;
+  }
+
+  .fo-rail-account-actions {
+    margin-top: 0.48rem !important;
+    gap: 0.42rem !important;
+  }
+
+  .fo-rail-theme-button,
+  .fo-rail-theme-toggle {
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+
+  .fo-rail-logout-button {
+    margin-top: 0.42rem !important;
+  }
+}
+
+@media (min-width: 1024px) and (max-height: 820px) {
+  .fo-rail-account {
+    margin-top: auto !important;
+    padding-top: 0.48rem !important;
+    padding-bottom: 0 !important;
+  }
+
+  .fo-rail-user-block {
+    padding-top: 0.28rem !important;
+    padding-bottom: 0.34rem !important;
+  }
+
+  .fo-rail-account-actions {
+    margin-top: 0.38rem !important;
+  }
+
+  .fo-rail-logout-button {
+    margin-top: 0.34rem !important;
+  }
+}
+/* FITOUTOS / ACCOUNT FOOTER BASE ALIGNMENT V6D END */
