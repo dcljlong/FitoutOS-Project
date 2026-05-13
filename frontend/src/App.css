@@ -1950,3 +1950,54 @@ html:not(.dark) .fo-main-content textarea {
   }
 }
 /* FITOUTOS / ACCOUNT FOOTER BASE ALIGNMENT V6D END */
+
+/* FITOUTOS / SUITE TRUE DARK WORKSPACE V6E
+   Suite standard:
+   - Light mode keeps the approved cream workspace.
+   - Dark mode becomes a true dark workspace.
+   - Rail/footer remain the approved V6D suite standard.
+*/
+@media (min-width: 1024px) {
+  .dark .fo-app-shell {
+    background:
+      radial-gradient(circle at top left, rgba(245, 190, 80, 0.08), transparent 28%),
+      linear-gradient(180deg, #060b16 0%, #08111f 46%, #050914 100%) !important;
+  }
+
+  .dark .fo-main-content {
+    background:
+      radial-gradient(circle at top left, rgba(245, 190, 80, 0.08), transparent 28%),
+      linear-gradient(180deg, #060b16 0%, #08111f 46%, #050914 100%) !important;
+    color: rgba(248, 250, 252, 0.94) !important;
+  }
+
+  .dark .fo-main-content > *,
+  .dark .fo-main-content [data-testid="dashboard-page"] {
+    background: transparent !important;
+  }
+
+  .dark .fo-main-content h1,
+  .dark .fo-main-content h2,
+  .dark .fo-main-content h3,
+  .dark .fo-main-content h4 {
+    color: rgba(248, 250, 252, 0.96) !important;
+  }
+
+  .dark .fo-main-content p,
+  .dark .fo-main-content span,
+  .dark .fo-main-content label {
+    color: inherit;
+  }
+
+  .dark .fo-main-content .text-muted-foreground {
+    color: rgba(203, 213, 225, 0.72) !important;
+  }
+
+  .dark .fo-main-content .bg-card,
+  .dark .fo-main-content [class*="bg-card"] {
+    background: rgba(7, 12, 24, 0.96) !important;
+    border-color: rgba(245, 190, 80, 0.18) !important;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22) !important;
+  }
+}
+/* FITOUTOS / SUITE TRUE DARK WORKSPACE V6E END */

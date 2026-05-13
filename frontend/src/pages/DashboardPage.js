@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -38,9 +38,19 @@ export default function DashboardPage() {
         api.get('/jobs'),
         api.get('/tasks'),
       ]);
+      const normaliseList = (payload) => {
+        if (Array.isArray(payload)) return payload;
+        if (Array.isArray(payload?.items)) return payload.items;
+        if (Array.isArray(payload?.jobs)) return payload.jobs;
+        if (Array.isArray(payload?.tasks)) return payload.tasks;
+        if (Array.isArray(payload?.data)) return payload.data;
+        if (Array.isArray(payload?.results)) return payload.results;
+        return [];
+      };
+
       setSummary(summaryRes.data);
-      setRecentJobs(jobsRes.data || []);
-      setAllTasks(tasksRes.data || []);
+      setRecentJobs(normaliseList(jobsRes.data));
+      setAllTasks(normaliseList(tasksRes.data));
     } catch (error) {
       toast.error('Failed to load dashboard data');
     } finally {
@@ -354,3 +364,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
