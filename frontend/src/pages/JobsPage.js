@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -55,7 +55,20 @@ export default function JobsPage() {
   const fetchJobs = async () => {
     try {
       const response = await api.get('/jobs');
-      setJobs(response.data);
+      const payload = response.data;
+      const nextJobs = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.jobs)
+            ? payload.jobs
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : Array.isArray(payload?.results)
+                ? payload.results
+                : [];
+
+      setJobs(nextJobs);
     } catch (error) {
       toast.error('Failed to load jobs');
     } finally {
@@ -386,6 +399,7 @@ const response = await api.post('/jobs', payload);
     </div>
   );
 }
+
 
 
 

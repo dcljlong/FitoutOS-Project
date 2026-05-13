@@ -2001,3 +2001,28 @@ html:not(.dark) .fo-main-content textarea {
   }
 }
 /* FITOUTOS / SUITE TRUE DARK WORKSPACE V6E END */
+
+/* FITOUTOS / LOGOUT ALIGNMENT MATCH LLD V6F
+   Matches the final LLD footer/logout button rhythm.
+*/
+@media (min-width: 768px) {
+  .fo-desktop-brand-rail .fo-rail-logout-button,
+  aside.sidebar .fo-rail-logout-button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.55rem !important;
+    width: 100% !important;
+    text-align: center !important;
+  }
+
+  .fo-desktop-brand-rail .fo-rail-logout-button svg,
+  aside.sidebar .fo-rail-logout-button svg {
+    width: 1rem !important;
+    height: 1rem !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+    transform: none !important;
+  }
+}
+/* FITOUTOS / LOGOUT ALIGNMENT MATCH LLD V6F END */
