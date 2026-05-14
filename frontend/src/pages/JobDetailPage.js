@@ -770,6 +770,22 @@ const fetchTaskMaterials = async (taskId) => {
     return 'Ready / Reviewed';
   };
 
+  const getDocumentWorkflowHelpText = (doc) => {
+    if (isDocumentLinkedToTask(doc)) {
+      return 'Linked to a task and treated as reviewed for programme control.';
+    }
+
+    if (doc.reference_only) {
+      return 'Held as reference only. It will not drive programme or scope unless reopened.';
+    }
+
+    if (doc.needs_review) {
+      return 'Set type/notes, then link an existing task or create a proposed task.';
+    }
+
+    return 'Reviewed but not linked. Link it if it affects programme, scope, risk, or recovery.';
+  };
+
   const getDocumentWorkflowRank = (doc) => {
     if (doc.needs_review && !doc.reference_only && !isDocumentLinkedToTask(doc)) return 0;
     if (isDocumentLinkedToTask(doc)) return 2;
@@ -1136,14 +1152,26 @@ const fetchTaskMaterials = async (taskId) => {
                         {canManage() && (
                           <div className="grid gap-3 md:grid-cols-3">
                             <div className="rounded-md border p-3 space-y-2">
-                              <div className="text-xs font-medium text-muted-foreground">1. Review step</div>
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-xs font-medium text-muted-foreground">1. Review / triage</div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    {getDocumentWorkflowHelpText(doc)}
+                                  </div>
+                                </div>
+                                <Badge
+                                  variant={doc.needs_review && !doc.reference_only && !isDocumentLinkedToTask(doc) ? 'destructive' : 'secondary'}
+                                >
+                                  {getDocumentWorkflowStatus(doc)}
+                                </Badge>
+                              </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button
-                                  variant="outline"
+                                  variant={doc.needs_review ? 'default' : 'outline'}
                                   size="sm"
-                                  onClick={() => handleUpdateDocumentReview(doc.id, { needs_review: false })}
+                                  onClick={() => handleUpdateDocumentReview(doc.id, { needs_review: !doc.needs_review })}
                                 >
-                                  Mark Reviewed
+                                  {doc.needs_review ? 'Mark Reviewed' : 'Reopen Review'}
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -1155,27 +1183,32 @@ const fetchTaskMaterials = async (taskId) => {
                                     use_for_scope: doc.reference_only ? doc.use_for_scope : false,
                                   })}
                                 >
-                                  {doc.reference_only ? 'Unset Reference Only' : 'Set Reference Only'}
+                                  {doc.reference_only ? 'Reopen as Candidate' : 'Set Reference Only'}
                                 </Button>
                               </div>
                             </div>
 
                             <div className="rounded-md border p-3 space-y-2">
-                              <div className="text-xs font-medium text-muted-foreground">2. Classify use</div>
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground">2. Classify / map</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  Type: {doc.detected_document_type || 'Not set'} · Notes: {doc.mapping_notes ? 'Added' : 'None'}
+                                </div>
+                              </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button
-                                  variant="outline"
+                                  variant={doc.use_for_programme ? 'default' : 'outline'}
                                   size="sm"
                                   onClick={() => handleUpdateDocumentReview(doc.id, { use_for_programme: !doc.use_for_programme })}
                                 >
-                                  {doc.use_for_programme ? 'Unset Programme Use' : 'Use for Programme'}
+                                  {doc.use_for_programme ? 'Programme Use On' : 'Use for Programme'}
                                 </Button>
                                 <Button
-                                  variant="outline"
+                                  variant={doc.use_for_scope ? 'default' : 'outline'}
                                   size="sm"
                                   onClick={() => handleUpdateDocumentReview(doc.id, { use_for_scope: !doc.use_for_scope })}
                                 >
-                                  {doc.use_for_scope ? 'Unset Scope Use' : 'Use for Scope'}
+                                  {doc.use_for_scope ? 'Scope Use On' : 'Use for Scope'}
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -1195,14 +1228,21 @@ const fetchTaskMaterials = async (taskId) => {
                             </div>
 
                             <div className="rounded-md border p-3 space-y-2">
-                              <div className="text-xs font-medium text-muted-foreground">3. Link / create task</div>
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground">3. Link / create task</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {isDocumentLinkedToTask(doc)
+                                    ? 'Already linked. Open or unlink the task below if the mapping is wrong.'
+                                    : 'Link an existing task, or create a proposed task for PM review.'}
+                                </div>
+                              </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   onClick={() => openDocumentActionDialog(doc)}
                                 >
-                                  Link to Task
+                                  Link Existing Task
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -2017,7 +2057,7 @@ const fetchTaskMaterials = async (taskId) => {
               {documentReviewEditMode === 'type' ? 'Set document type' : 'Add mapping note'}
             </DialogTitle>
             <DialogDescription>
-              Update the document review metadata without leaving the Documents workflow.
+              Record the PM review decision for task mapping. Use short, factual notes; avoid treating document analysis as certain.
             </DialogDescription>
           </DialogHeader>
 
@@ -2090,7 +2130,7 @@ const fetchTaskMaterials = async (taskId) => {
           <DialogHeader>
             <DialogTitle>Review document task action</DialogTitle>
             <DialogDescription>
-              Choose an existing task from a visible list, or create a proposed task from this document.
+              Suggested matches are confidence-based. Link an existing task when the document affects programme or scope, or create a proposed task for PM review.
             </DialogDescription>
           </DialogHeader>
 
