@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -113,7 +113,7 @@ export default function JobDetailPage() {
   const [documents, setDocuments] = useState([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
   const [analyzingDocs, setAnalyzingDocs] = useState(false);
-  
+
   // Task dialog state
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -211,7 +211,7 @@ export default function JobDetailPage() {
       setDocuments(Array.isArray(documentsRes.data) ? documentsRes.data : []);
       setAnalysis(analysisRes.data || jobRes.data?.latest_analysis || null);
       setUnmatchedLabour(unmatchedRes.data.rows || []);
-      
+
     } catch (error) {
       toast.error('Failed to load job details');
     } finally {
@@ -508,7 +508,7 @@ const fetchTaskMaterials = async (taskId) => {
   const handleSaveTask = async (e) => {
     e.preventDefault();
     setSavingTask(true);
-    
+
     const payload = {
       job_id: jobId,
       task_name: taskForm.task_name,
@@ -588,9 +588,9 @@ const fetchTaskMaterials = async (taskId) => {
   const handleSaveMaterial = async (e) => {
     e.preventDefault();
     if (!selectedTask) return;
-    
+
     setSavingMaterial(true);
-    
+
     const payload = {
       task_id: selectedTask.id,
       name: materialForm.name,
@@ -632,7 +632,7 @@ const fetchTaskMaterials = async (taskId) => {
         delivery_buffer_days: material.delivery_buffer_days,
         status: newStatus,
       };
-      
+
       const response = await api.put(`/materials/${materialId}`, payload);
       setTaskMaterials(taskMaterials.map(m => m.id === materialId ? response.data : m));
       toast.success('Status updated');
@@ -816,7 +816,7 @@ const fetchTaskMaterials = async (taskId) => {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Previous
         </Link>
-        
+
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -825,7 +825,7 @@ const fetchTaskMaterials = async (taskId) => {
             </div>
             <h1 className="text-3xl font-bold font-['Manrope']">{job.job_name}</h1>
           </div>
-          
+
           {canManage() && (
               <div className="flex gap-2 flex-wrap">
                 <Link to={`/jobs/${jobId}/programmes`}>
@@ -873,7 +873,7 @@ const fetchTaskMaterials = async (taskId) => {
             </CardContent>
           </Card>
         )}
-        
+
         {job.site_address && (
           <Card>
             <CardContent className="p-4">
@@ -887,7 +887,7 @@ const fetchTaskMaterials = async (taskId) => {
             </CardContent>
           </Card>
         )}
-        
+
         {job.planned_start && (
           <Card>
             <CardContent className="p-4">
@@ -901,7 +901,7 @@ const fetchTaskMaterials = async (taskId) => {
             </CardContent>
           </Card>
         )}
-        
+
         {job.planned_finish && (
           <Card>
             <CardContent className="p-4">
@@ -1207,7 +1207,8 @@ const fetchTaskMaterials = async (taskId) => {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => openDocumentActionDialog(doc)}
+                                  onClick={() => handleCreateTaskFromDocument(doc)}
+                                  data-testid="document-create-proposed-task-button"
                                 >
                                   Create Proposed Task
                                 </Button>
@@ -1440,9 +1441,9 @@ const fetchTaskMaterials = async (taskId) => {
           ) : (
             <div className="space-y-2">
               {tasks.map((task) => (
-                <Card 
-                  key={task.id} 
-                  className="card-hover cursor-pointer" 
+                <Card
+                  key={task.id}
+                  className="card-hover cursor-pointer"
                   onClick={() => openTaskDetail(task)}
                   data-testid={`task-${task.id}`}
                 >
@@ -1587,8 +1588,8 @@ const fetchTaskMaterials = async (taskId) => {
                         </div>
                       </div>
                       {canManage() && (
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           variant="outline"
                           onClick={async () => {
                             try {
@@ -1656,7 +1657,7 @@ const fetchTaskMaterials = async (taskId) => {
                   data-testid="task-name-input"
                 />
               </div>
-              
+
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Type</Label>
                 <Input
@@ -1677,7 +1678,7 @@ const fetchTaskMaterials = async (taskId) => {
                 />
               </div>
 
-              
+
 
                 <div className="col-span-4 pt-2">
                   <div className="rounded-lg border p-4 space-y-4">
@@ -2408,8 +2409,8 @@ const fetchTaskMaterials = async (taskId) => {
                   ) : (
                     <div className="space-y-2">
                       {taskMaterials.map(material => (
-                        <div 
-                          key={material.id} 
+                        <div
+                          key={material.id}
                           className="p-3 border rounded-lg"
                           data-testid={`material-${material.id}`}
                         >
@@ -2465,8 +2466,8 @@ const fetchTaskMaterials = async (taskId) => {
                 {/* Edit Task Button */}
                 {canManage() && (
                   <div className="flex gap-2 pt-4 border-t">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       className="flex-1"
                       onClick={() => {
                         closeTaskDetail();
@@ -2599,9 +2600,9 @@ const fetchTaskMaterials = async (taskId) => {
       </Dialog>
 
       {/* Delay Recording Dialog */}
-      <Dialog open={delayDialogOpen} onOpenChange={(open) => { 
-        setDelayDialogOpen(open); 
-        if (!open) setDelayForm({ task_id: '', delay_type: 'main_contractor', delay_days: '', description: '', caused_by: '', impact_description: '' }); 
+      <Dialog open={delayDialogOpen} onOpenChange={(open) => {
+        setDelayDialogOpen(open);
+        if (!open) setDelayForm({ task_id: '', delay_type: 'main_contractor', delay_days: '', description: '', caused_by: '', impact_description: '' });
       }}>
         <DialogContent className="sm:max-w-[500px]">
           <form onSubmit={async (e) => {
@@ -2726,39 +2727,3 @@ const fetchTaskMaterials = async (taskId) => {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
