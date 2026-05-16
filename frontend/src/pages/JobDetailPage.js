@@ -2154,20 +2154,23 @@ const fetchTaskMaterials = async (taskId) => {
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Review document task action</DialogTitle>
+            <DialogTitle>Link Existing Task</DialogTitle>
             <DialogDescription>
-              Suggested matches are confidence-based. Link an existing task when the document affects programme or scope, or create a proposed task for PM review.
+              Review confidence-based suggestions, or search all visible tasks before linking this document. Create a proposed task only when no existing task fits.
             </DialogDescription>
           </DialogHeader>
 
           {activeDocument && (
             <div className="space-y-4">
               <div className="rounded-md border bg-muted/30 p-3">
-                <div className="font-medium text-sm">
-                  {activeDocument.original_filename || activeDocument.filename || activeDocument.name || 'Document'}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">Document source</Badge>
+                  <span className="font-medium text-sm">
+                    {activeDocument.original_filename || activeDocument.filename || activeDocument.name || 'Document'}
+                  </span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {activeDocument.detected_document_type || 'No document type set'}
+                <div className="text-xs text-muted-foreground mt-2">
+                  Type: {activeDocument.detected_document_type || 'No document type set'}
                 </div>
                 {activeDocument.mapping_notes && (
                   <div className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap">
@@ -2178,7 +2181,10 @@ const fetchTaskMaterials = async (taskId) => {
 
               {getSuggestedTasksForDocument(activeDocument).length > 0 && (
                 <div className="space-y-2">
-                  <Label>Suggested matches</Label>
+                  <div>
+                    <Label>Suggested matches</Label>
+                    <div className="text-xs text-muted-foreground">Confidence-based only. Check the task before linking.</div>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {getSuggestedTasksForDocument(activeDocument).map((task) => (
                       <Button
@@ -2196,11 +2202,11 @@ const fetchTaskMaterials = async (taskId) => {
               )}
 
               <div className="space-y-2">
-                <Label>Find existing task</Label>
+                <Label>Search existing tasks</Label>
                 <Input
                   value={documentTaskSearch}
                   onChange={(e) => setDocumentTaskSearch(e.target.value)}
-                  placeholder="Search by task name, level, package, contract, or area"
+                  placeholder="Search task name, level, package, contract, or area before linking"
                 />
               </div>
 
@@ -2234,7 +2240,7 @@ const fetchTaskMaterials = async (taskId) => {
                         size="sm"
                         onClick={() => handleLinkDocumentToTask(activeDocument.id, task.id)}
                       >
-                        Link
+                        Link Existing Task
                       </Button>
                     </div>
                   ))}
@@ -2254,7 +2260,7 @@ const fetchTaskMaterials = async (taskId) => {
                     .some((value) => String(value).toLowerCase().includes(needle));
                 }).length === 0 && (
                   <div className="text-sm text-muted-foreground p-2">
-                    No matching tasks found.
+                    No matching tasks found. Try a package, level, area, or contract term.
                   </div>
                 )}
               </div>
