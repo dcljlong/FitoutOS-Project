@@ -2194,7 +2194,10 @@ const fetchTaskMaterials = async (taskId) => {
                         size="sm"
                         onClick={() => handleLinkDocumentToTask(activeDocument.id, task.id)}
                       >
-                        {task.task_name}
+                        <span className="flex flex-col items-start leading-tight">
+                          <span>{task.task_name}</span>
+                          <span className="text-[11px] text-muted-foreground">Match score {task._matchScore}</span>
+                        </span>
                       </Button>
                     ))}
                   </div>
