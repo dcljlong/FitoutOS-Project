@@ -786,6 +786,27 @@ const fetchTaskMaterials = async (taskId) => {
     return 'Reviewed but not linked. Link it if it affects programme, scope, risk, or recovery.';
   };
 
+  const formatDocumentReviewTimestamp = (value) => {
+    if (!value) return 'Not recorded';
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return String(value);
+    }
+
+    return parsed.toLocaleString();
+  };
+
+  const getDocumentUseSummary = (doc) => {
+    if (doc.reference_only) return 'Reference only';
+
+    const uses = [];
+    if (doc.use_for_programme) uses.push('Programme');
+    if (doc.use_for_scope) uses.push('Scope');
+
+    return uses.length ? `${uses.join(' + ')} candidate` : 'Use not selected';
+  };
+
   const getDocumentWorkflowRank = (doc) => {
     if (doc.needs_review && !doc.reference_only && !isDocumentLinkedToTask(doc)) return 0;
     if (isDocumentLinkedToTask(doc)) return 2;
@@ -1145,6 +1166,8 @@ const fetchTaskMaterials = async (taskId) => {
                             {doc.detected_document_type && (
                               <Badge variant="outline">{doc.detected_document_type}</Badge>
                             )}
+                            {doc.use_for_programme && <Badge variant="outline">Programme Use</Badge>}
+                            {doc.use_for_scope && <Badge variant="outline">Scope Use</Badge>}
                             <Badge variant="secondary">{getDocumentWorkflowStatus(doc)}</Badge>
                           </div>
                         </div>
@@ -1272,7 +1295,7 @@ const fetchTaskMaterials = async (taskId) => {
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-sm">
                           <div>
                             <span className="text-muted-foreground">OCR:</span>{' '}
                             <span>{doc.ocr_status || '-'}</span>
@@ -1283,7 +1306,15 @@ const fetchTaskMaterials = async (taskId) => {
                           </div>
                           <div>
                             <span className="text-muted-foreground">Use:</span>{' '}
-                            <span>{doc.reference_only ? 'Reference only' : 'Programme / scope candidate'}</span>
+                            <span>{getDocumentUseSummary(doc)}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Last review:</span>{' '}
+                            <span>{formatDocumentReviewTimestamp(doc.reviewed_at)}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Reviewer:</span>{' '}
+                            <span>{doc.reviewed_by || 'Not recorded'}</span>
                           </div>
                         </div>
 
