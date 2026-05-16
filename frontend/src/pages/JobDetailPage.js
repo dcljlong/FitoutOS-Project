@@ -760,8 +760,10 @@ const fetchTaskMaterials = async (taskId) => {
       .slice(0, 3);
   };
 
-  const isDocumentLinkedToTask = (doc) =>
-    tasks.some((task) => (task.linked_file_ids || []).includes(doc.id));
+  const getLinkedTasksForDocument = (doc) =>
+    tasks.filter((task) => (task.linked_file_ids || []).includes(doc.id));
+
+  const isDocumentLinkedToTask = (doc) => getLinkedTasksForDocument(doc).length > 0;
 
   const getDocumentWorkflowStatus = (doc) => {
     if (isDocumentLinkedToTask(doc)) return 'Linked';
@@ -833,6 +835,10 @@ const fetchTaskMaterials = async (taskId) => {
   const documentImpactDocuments = documents
     .filter((doc) => !doc.reference_only && (doc.use_for_programme || doc.use_for_scope))
     .sort((a, b) => {
+      const aLinked = isDocumentLinkedToTask(a);
+      const bLinked = isDocumentLinkedToTask(b);
+      if (aLinked !== bLinked) return aLinked ? 1 : -1;
+
       const bUseCount = Number(!!b.use_for_programme) + Number(!!b.use_for_scope);
       const aUseCount = Number(!!a.use_for_programme) + Number(!!a.use_for_scope);
       if (bUseCount !== aUseCount) return bUseCount - aUseCount;
@@ -847,9 +853,16 @@ const fetchTaskMaterials = async (taskId) => {
       if (doc.use_for_programme) acc.programme += 1;
       if (doc.use_for_scope) acc.scope += 1;
       if (doc.mapping_notes) acc.withNotes += 1;
+
+      if (isDocumentLinkedToTask(doc)) {
+        acc.linked += 1;
+      } else {
+        acc.unlinked += 1;
+      }
+
       return acc;
     },
-    { programme: 0, scope: 0, withNotes: 0 }
+    { programme: 0, scope: 0, withNotes: 0, linked: 0, unlinked: 0 }
   );
 
   const orderedDocuments = [...documents].sort((a, b) => {
@@ -1412,11 +1425,11 @@ const fetchTaskMaterials = async (taskId) => {
                   </p>
                 </div>
                 <Badge variant="outline">
-                  {documentImpactDocuments.length} impact candidate{documentImpactDocuments.length === 1 ? '' : 's'}
+                  {documentImpactDocuments.length} impact candidate{documentImpactDocuments.length === 1 ? '' : 's'} / {documentImpactSummary.unlinked} unlinked
                 </Badge>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-md border p-3">
                   <div className="text-xs font-medium text-muted-foreground">Programme candidates</div>
                   <div className="text-2xl font-semibold">{documentImpactSummary.programme}</div>
@@ -1429,6 +1442,10 @@ const fetchTaskMaterials = async (taskId) => {
                   <div className="text-xs font-medium text-muted-foreground">With mapping notes</div>
                   <div className="text-2xl font-semibold">{documentImpactSummary.withNotes}</div>
                 </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-xs font-medium text-muted-foreground">Unlinked action needed</div>
+                  <div className="text-2xl font-semibold">{documentImpactSummary.unlinked}</div>
+                </div>
               </div>
 
               {documentImpactDocuments.length === 0 ? (
@@ -1437,52 +1454,86 @@ const fetchTaskMaterials = async (taskId) => {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {documentImpactDocuments.slice(0, 5).map((doc) => (
-                    <div key={`document-impact-${doc.id}`} className="rounded-md border p-3 space-y-2">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="font-medium text-sm">
-                            {doc.original_filename || doc.filename || doc.name || 'Document'}
+                  {documentImpactDocuments.slice(0, 5).map((doc) => {
+                    const linkedTasks = getLinkedTasksForDocument(doc);
+                    const isLinked = linkedTasks.length > 0;
+
+                    return (
+                      <div key={`document-impact-${doc.id}`} className="rounded-md border p-3 space-y-2">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="font-medium text-sm">
+                              {doc.original_filename || doc.filename || doc.name || 'Document'}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Type: {doc.detected_document_type || 'Not set'} · Review: {doc.needs_review ? 'Pending' : 'Reviewed'}
+                            </div>
                           </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Type: {doc.detected_document_type || 'Not set'} · Review: {doc.needs_review ? 'Pending' : 'Reviewed'}
+                          <div className="flex flex-wrap gap-2">
+                            {doc.use_for_programme && <Badge variant="outline">Programme Use</Badge>}
+                            {doc.use_for_scope && <Badge variant="outline">Scope Use</Badge>}
+                            <Badge variant="secondary">{getDocumentWorkflowStatus(doc)}</Badge>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {doc.use_for_programme && <Badge variant="outline">Programme Use</Badge>}
-                          {doc.use_for_scope && <Badge variant="outline">Scope Use</Badge>}
-                          <Badge variant="secondary">{getDocumentWorkflowStatus(doc)}</Badge>
-                        </div>
+
+                        {doc.mapping_notes && (
+                          <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+                            {doc.mapping_notes}
+                          </div>
+                        )}
+
+                        {isLinked && (
+                          <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground">
+                              Linked task{linkedTasks.length === 1 ? '' : 's'}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {linkedTasks.map((task) => (
+                                <Button
+                                  key={`document-impact-linked-task-${doc.id}-${task.id}`}
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openTaskDetail(task)}
+                                >
+                                  Open linked task: {task.task_name}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {canManage() && (
+                          <div className="flex flex-wrap gap-2">
+                            {isLinked ? (
+                              <div className="text-xs text-muted-foreground">
+                                Already linked. Open the linked task above, or unlink it from the task/document detail if the mapping is wrong.
+                              </div>
+                            ) : (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openDocumentActionDialog(doc)}
+                                >
+                                  Link Existing Task
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleCreateTaskFromDocument(doc)}
+                                >
+                                  Create Proposed Task
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
-
-                      {doc.mapping_notes && (
-                        <div className="text-xs text-muted-foreground whitespace-pre-wrap">
-                          {doc.mapping_notes}
-                        </div>
-                      )}
-
-                      {canManage() && (
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openDocumentActionDialog(doc)}
-                          >
-                            Link Existing Task
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCreateTaskFromDocument(doc)}
-                          >
-                            Create Proposed Task
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
