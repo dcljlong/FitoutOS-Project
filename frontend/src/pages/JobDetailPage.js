@@ -830,6 +830,28 @@ const fetchTaskMaterials = async (taskId) => {
     { reviewQueue: 0, ready: 0, linked: 0, referenceOnly: 0 }
   );
 
+  const documentImpactDocuments = documents
+    .filter((doc) => !doc.reference_only && (doc.use_for_programme || doc.use_for_scope))
+    .sort((a, b) => {
+      const bUseCount = Number(!!b.use_for_programme) + Number(!!b.use_for_scope);
+      const aUseCount = Number(!!a.use_for_programme) + Number(!!a.use_for_scope);
+      if (bUseCount !== aUseCount) return bUseCount - aUseCount;
+
+      const bTime = b.reviewed_at || b.uploaded_at ? new Date(b.reviewed_at || b.uploaded_at).getTime() : 0;
+      const aTime = a.reviewed_at || a.uploaded_at ? new Date(a.reviewed_at || a.uploaded_at).getTime() : 0;
+      return bTime - aTime;
+    });
+
+  const documentImpactSummary = documentImpactDocuments.reduce(
+    (acc, doc) => {
+      if (doc.use_for_programme) acc.programme += 1;
+      if (doc.use_for_scope) acc.scope += 1;
+      if (doc.mapping_notes) acc.withNotes += 1;
+      return acc;
+    },
+    { programme: 0, scope: 0, withNotes: 0 }
+  );
+
   const orderedDocuments = [...documents].sort((a, b) => {
     const rankDiff = getDocumentWorkflowRank(a) - getDocumentWorkflowRank(b);
     if (rankDiff !== 0) return rankDiff;
@@ -1380,6 +1402,92 @@ const fetchTaskMaterials = async (taskId) => {
         </TabsContent>
 
         <TabsContent value="programme" className="space-y-4">
+          <Card data-testid="document-impact-review-card">
+            <CardContent className="pt-6 space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="text-sm font-medium">Document programme / scope impact review</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Uses reviewed document flags only. Treat these as PM review cues until linked to a task or converted into a proposed task.
+                  </p>
+                </div>
+                <Badge variant="outline">
+                  {documentImpactDocuments.length} impact candidate{documentImpactDocuments.length === 1 ? '' : 's'}
+                </Badge>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border p-3">
+                  <div className="text-xs font-medium text-muted-foreground">Programme candidates</div>
+                  <div className="text-2xl font-semibold">{documentImpactSummary.programme}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-xs font-medium text-muted-foreground">Scope candidates</div>
+                  <div className="text-2xl font-semibold">{documentImpactSummary.scope}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-xs font-medium text-muted-foreground">With mapping notes</div>
+                  <div className="text-2xl font-semibold">{documentImpactSummary.withNotes}</div>
+                </div>
+              </div>
+
+              {documentImpactDocuments.length === 0 ? (
+                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  No reviewed documents are currently marked for programme or scope use.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {documentImpactDocuments.slice(0, 5).map((doc) => (
+                    <div key={`document-impact-${doc.id}`} className="rounded-md border p-3 space-y-2">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="font-medium text-sm">
+                            {doc.original_filename || doc.filename || doc.name || 'Document'}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Type: {doc.detected_document_type || 'Not set'} · Review: {doc.needs_review ? 'Pending' : 'Reviewed'}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {doc.use_for_programme && <Badge variant="outline">Programme Use</Badge>}
+                          {doc.use_for_scope && <Badge variant="outline">Scope Use</Badge>}
+                          <Badge variant="secondary">{getDocumentWorkflowStatus(doc)}</Badge>
+                        </div>
+                      </div>
+
+                      {doc.mapping_notes && (
+                        <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+                          {doc.mapping_notes}
+                        </div>
+                      )}
+
+                      {canManage() && (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDocumentActionDialog(doc)}
+                          >
+                            Link Existing Task
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCreateTaskFromDocument(doc)}
+                          >
+                            Create Proposed Task
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {canManage() && programme.length > 0 && (
             <div className="flex justify-end">
               <Button onClick={handleGenerateTasksFromProgramme}>
