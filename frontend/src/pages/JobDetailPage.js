@@ -1680,12 +1680,38 @@ const fetchTaskMaterials = async (taskId) => {
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSaveTask}>
             <DialogHeader>
-              <DialogTitle>{editingTask ? 'Edit Task' : 'Create Task'}</DialogTitle>
+              <DialogTitle>
+                {editingTask
+                  ? 'Edit Task'
+                  : pendingDocumentTask
+                    ? 'Create Proposed Task from Document'
+                    : 'Create Task'}
+              </DialogTitle>
               <DialogDescription>
-                {editingTask ? 'Update task details' : 'Add a new task to this job'}
+                {editingTask
+                  ? 'Update task details'
+                  : pendingDocumentTask
+                    ? 'Review and adjust the proposed task before it is linked to the source document.'
+                    : 'Add a new task to this job'}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              {pendingDocumentTask && !editingTask && (
+                <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">Document source</Badge>
+                    <span className="text-sm font-medium">
+                      {pendingDocumentTask.original_filename || pendingDocumentTask.filename || pendingDocumentTask.name || 'Document'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Type: {pendingDocumentTask.detected_document_type || 'Not set'} · Notes: {pendingDocumentTask.mapping_notes ? 'Added' : 'None'}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    This will create a proposed task, link the source document, and mark the document reviewed after save.
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Task Name *</Label>
                 <Input
@@ -2035,7 +2061,7 @@ const fetchTaskMaterials = async (taskId) => {
               </Button>
               <Button type="submit" disabled={savingTask} data-testid="save-task-btn">
                 {savingTask && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {editingTask ? 'Update Task' : 'Create Task'}
+                {editingTask ? 'Update Task' : pendingDocumentTask ? 'Create Proposed Task' : 'Create Task'}
               </Button>
             </DialogFooter>
           </form>
