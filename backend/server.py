@@ -823,6 +823,13 @@ def require_roles(*roles):
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
+    allow_public_registration = os.environ.get("ALLOW_PUBLIC_REGISTRATION", "false").strip().lower()
+    if allow_public_registration not in {"1", "true", "yes", "on"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Public registration is disabled. Ask an admin to create your account."
+        )
+
     email = user_data.email.strip().lower()
     existing = await db.users.find_one({"email": email})
     if existing:
@@ -3518,6 +3525,13 @@ def require_roles(*roles):
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
+    allow_public_registration = os.environ.get("ALLOW_PUBLIC_REGISTRATION", "false").strip().lower()
+    if allow_public_registration not in {"1", "true", "yes", "on"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Public registration is disabled. Ask an admin to create your account."
+        )
+
     email = user_data.email.strip().lower()
     existing = await db.users.find_one({"email": email})
     if existing:
