@@ -40,6 +40,7 @@ const getErrorMessage = (error, fallback) => {
 export default function LoginPage() {
   const { login, register } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const allowPublicRegistration = process.env.REACT_APP_ALLOW_PUBLIC_REGISTRATION === 'true';
   const [loading, setLoading] = useState(false);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -137,13 +138,17 @@ export default function LoginPage() {
 
             <CardContent>
               <Tabs defaultValue="login" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-6 bg-white/10">
+                <TabsList
+                  className={`grid w-full ${allowPublicRegistration ? 'grid-cols-2' : 'grid-cols-1'} mb-6 bg-white/10`}
+                >
                   <TabsTrigger value="login" data-testid="login-tab">
                     Sign In
                   </TabsTrigger>
-                  <TabsTrigger value="register" data-testid="register-tab">
-                    Register
-                  </TabsTrigger>
+                  {allowPublicRegistration && (
+                    <TabsTrigger value="register" data-testid="register-tab">
+                      Register
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 <TabsContent value="login">
@@ -190,6 +195,7 @@ export default function LoginPage() {
                   </form>
                 </TabsContent>
 
+                {allowPublicRegistration && (
                 <TabsContent value="register">
                   <form onSubmit={handleRegister} className="space-y-4">
                     <div className="space-y-2">
@@ -280,6 +286,7 @@ export default function LoginPage() {
                     </Button>
                   </form>
                 </TabsContent>
+                )}
               </Tabs>
             </CardContent>
           </Card>
