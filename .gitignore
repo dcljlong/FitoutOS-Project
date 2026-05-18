@@ -41,3 +41,20 @@ backend/uploads/
 
 # Local stable backups
 stable_backups/
+
+# Local backup/hygiene artifacts
+backups/
+frontend_V1_LOCK/
+frontend_V1_LOCK_*/
+*.bak
+*.backup
+*.old
+*_backup*
+*backup_*
+backend/server_backup*.py
+backend/server.py.*backup*
+backend/server.py.*.bak
+backend/requirements.txt.bak*
+backend/requirements.txt.backup*
+frontend/src/**/*.bak*
+frontend/src/**/*backup*
