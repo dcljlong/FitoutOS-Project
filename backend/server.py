@@ -55,6 +55,10 @@ def root():
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+@api_router.get("/health")
+async def api_health_check():
+    return {"status": "healthy", "service": "fitoutos"}
+
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -2841,6 +2845,10 @@ def root():
     return {"status": "FitoutOS backend running"}
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
+
+@api_router.get("/health")
+async def api_health_check():
+    return {"status": "healthy", "service": "fitoutos"}
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
