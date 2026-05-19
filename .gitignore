@@ -58,3 +58,7 @@ backend/requirements.txt.bak*
 backend/requirements.txt.backup*
 frontend/src/**/*.bak*
 frontend/src/**/*backup*
+
+# Local credential/test artifacts
+memory/test_credentials.md
+test_credentials.md
