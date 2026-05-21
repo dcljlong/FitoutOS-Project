@@ -16,6 +16,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  MessageSquare,
   Building2,
   BookOpen,
   Clock3,
@@ -84,6 +85,22 @@ const Layout = () => {
   const displayName = getDisplayName(user);
   const roleLabel = formatRole(user?.role);
 
+  const handleFeedbackClick = () => {
+    const subject = encodeURIComponent('[FitoutOS Feedback] Pilot feedback');
+    const body = encodeURIComponent([
+      'App: FitoutOS',
+      `Page: ${location.pathname}`,
+      `User: ${user?.email || displayName || 'Unknown'}`,
+      '',
+      'Feedback type:',
+      'What happened:',
+      'What did you expect:',
+      'How urgent:',
+    ].join('\n'));
+
+    window.location.href = `mailto:longlinesuite.feedback@gmail.com?subject=${subject}&body=${body}`;
+  };
+
   return (
     <div className="fo-app-shell" data-testid="fitoutos-layout">
       <nav className="fo-top-nav">
@@ -151,6 +168,18 @@ const Layout = () => {
               <span className="fo-user-name">{displayName}</span>
               <span className="fo-user-role">{roleLabel}</span>
             </span>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleFeedbackClick}
+              className="fo-logout-button"
+              data-testid="feedback-btn"
+              aria-label="Send FitoutOS feedback"
+            >
+              <MessageSquare className="h-4 w-4" />
+              <span className="ml-2 hidden sm:inline">Feedback</span>
+            </Button>
 
             <Button
               variant="ghost"
@@ -262,6 +291,18 @@ const Layout = () => {
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleFeedbackClick}
+                className="fo-rail-logout-button"
+                data-testid="rail-feedback-button"
+                aria-label="Send FitoutOS feedback"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>Feedback</span>
+              </Button>
 
               <Button
                 variant="ghost"
