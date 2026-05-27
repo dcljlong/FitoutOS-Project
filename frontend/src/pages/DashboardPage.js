@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
@@ -24,6 +24,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [recentJobs, setRecentJobs] = useState([]);
+  const [labourByJob, setLabourByJob] = useState([]);
   const [allTasks, setAllTasks] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -33,10 +34,11 @@ export default function DashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      const [summaryRes, jobsRes, tasksRes] = await Promise.all([
+      const [summaryRes, jobsRes, tasksRes, labourRes] = await Promise.all([
         api.get('/dashboard/summary'),
         api.get('/jobs'),
         api.get('/tasks'),
+        api.get('/reports/hours-by-job'),
       ]);
       const normaliseList = (payload) => {
         if (Array.isArray(payload)) return payload;
@@ -50,6 +52,7 @@ export default function DashboardPage() {
 
       setSummary(summaryRes.data);
       setRecentJobs(normaliseList(jobsRes.data));
+      setLabourByJob(normaliseList(labourRes.data));
       setAllTasks(normaliseList(tasksRes.data));
     } catch (error) {
       toast.error('Failed to load dashboard data');
@@ -70,6 +73,36 @@ export default function DashboardPage() {
   const completedCount = allTasks.filter(t => t.status === 'complete').length;
   const blockedCount = allTasks.filter(t => t.is_blocked || t.status === 'blocked').length;
   const atRiskCount = allTasks.filter(t => t.delay_risk || t.at_risk || t.status === 'at_risk' || t.status === 'delayed').length;
+
+  const labourRows = Array.isArray(labourByJob) ? labourByJob : [];
+  const labourTotalHours = labourRows.reduce((sum, row) => {
+    const value = Number(row?.total_hours ?? row?.actual_hours ?? 0);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+  const labourJobCount = labourRows.filter((row) => {
+    const value = Number(row?.total_hours ?? row?.actual_hours ?? 0);
+    return Number.isFinite(value) && value > 0;
+  }).length;
+  const labourTopRows = labourRows
+    .filter((row) => {
+      const value = Number(row?.total_hours ?? row?.actual_hours ?? 0);
+      return Number.isFinite(value) && value > 0;
+    })
+    .sort((a, b) => Number(b?.total_hours ?? b?.actual_hours ?? 0) - Number(a?.total_hours ?? a?.actual_hours ?? 0))
+    .slice(0, 3);
+
+  const formatLabourHours = (value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toFixed(1) : '0.0';
+  };
+
+  const formatTaskCodes = (codes) => {
+    if (!Array.isArray(codes) || codes.length === 0) return 'No task-code split yet';
+    return codes
+      .slice(0, 3)
+      .map((code) => `${code.task_code}: ${formatLabourHours(code.hours)}h`)
+      .join(' • ');
+  };
 
   if (loading) {
     return (
@@ -174,7 +207,71 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-4">
-        <Card className="xl:col-span-3" data-testid="recent-jobs">
+        <Card className="xl:col-span-3" data-testid="timesheet-labour-dashboard-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-xl">Timesheet Labour</CardTitle>
+              <CardDescription>Approved labour imported from Timesheet Manager and grouped by FitoutOS job/task code</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div className="rounded-lg border bg-muted/30 p-3" data-testid="timesheet-labour-total-hours">
+                  <div className="text-xs text-muted-foreground">Imported actual hours</div>
+                  <div className="mt-1 text-2xl font-bold">{formatLabourHours(labourTotalHours)}h</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3" data-testid="timesheet-labour-job-count">
+                  <div className="text-xs text-muted-foreground">Jobs with labour</div>
+                  <div className="mt-1 text-2xl font-bold">{labourJobCount}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="text-xs text-muted-foreground">Source</div>
+                  <div className="mt-1 text-sm font-semibold">Timesheet Manager export</div>
+                  <div className="text-xs text-muted-foreground">Approved rows only</div>
+                </div>
+              </div>
+
+              {labourTopRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground" data-testid="timesheet-labour-empty">
+                  No imported Timesheet Manager labour is currently visible. Import approved rows to populate this dashboard.
+                </div>
+              ) : (
+                <div className="space-y-2" data-testid="timesheet-labour-top-jobs">
+                  {labourTopRows.map((row) => (
+                    <div
+                      key={`${row.job_id || row.job_number}-${row.job_name || 'job'}`}
+                      className="flex flex-col gap-1 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-sm text-muted-foreground">{row.job_number || 'No job #'}</span>
+                          <span className="font-semibold">{row.job_name || 'Unnamed job'}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{formatTaskCodes(row.task_codes)}</p>
+                      </div>
+                      <div className="text-left md:text-right">
+                        <div className="text-lg font-bold">{formatLabourHours(row.total_hours ?? row.actual_hours)}h</div>
+                        <div className="text-xs text-muted-foreground">actual labour</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link to="/reports">
+                  <Button variant="outline" size="sm" data-testid="timesheet-labour-view-reports">
+                    View Reports
+                  </Button>
+                </Link>
+                <Link to="/jobs">
+                  <Button variant="ghost" size="sm">
+                    Open Jobs
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="xl:col-span-3" data-testid="recent-jobs">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-3">
               <div>
