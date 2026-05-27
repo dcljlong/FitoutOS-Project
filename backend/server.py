@@ -4283,26 +4283,72 @@ async def get_dashboard_summary(user: dict = Depends(get_current_user)):
 
 @api_router.get("/reports/hours-by-job")
 async def get_hours_by_job(user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
-    """Get hours summary by job"""
-    pipeline = [
-        {"$match": {"status": "approved"}},
-        {"$group": {
-            "_id": "$job_id",
-            "job_number": {"$first": "$job_number"},
-            "job_name": {"$first": "$job_name"},
-            "total_hours": {"$sum": "$hours"}
-        }},
-        {"$sort": {"total_hours": -1}}
-    ]
-    results = await db.timesheets.aggregate(pipeline).to_list(100)
+    actual_rows = await db.actual_labour.find({}, {"_id": 0}).to_list(10000)
+    jobs = await db.jobs.find({}, {"_id": 0}).to_list(10000)
 
-    for r in results:
-        if r["_id"]:
-            tasks = await db.tasks.find({"job_id": r["_id"]}, {"_id": 0, "quoted_hours": 1}).to_list(1000)
-            r["quoted_hours"] = sum(t.get("quoted_hours", 0) or 0 for t in tasks)
-            r["variance"] = r["total_hours"] - r["quoted_hours"] if r["quoted_hours"] else None
+    jobs_by_id = {
+        str(job.get("id")): job
+        for job in jobs
+        if job.get("id")
+    }
+    jobs_by_number = {
+        str(job.get("job_number")): job
+        for job in jobs
+        if job.get("job_number")
+    }
 
-    return results
+    buckets = {}
+
+    for row in actual_rows:
+        job_id = str(row.get("job_id") or "").strip()
+        job_number = str(row.get("job_number") or "").strip()
+
+        job = jobs_by_id.get(job_id) if job_id else None
+        if job is None and job_number:
+            job = jobs_by_number.get(job_number)
+
+        # Ignore orphaned imported labour from jobs that have since been deleted.
+        if job is None:
+            continue
+
+        resolved_job_id = str(job.get("id") or job_id or "").strip()
+        resolved_job_number = str(job.get("job_number") or job_number or "").strip()
+        resolved_job_name = str(job.get("job_name") or job.get("name") or "").strip()
+        task_code = str(row.get("task_code") or row.get("task_code_id") or row.get("task_name") or "Uncoded").strip() or "Uncoded"
+
+        try:
+            hours = float(row.get("hours") or row.get("actual_hours") or 0)
+        except (TypeError, ValueError):
+            hours = 0.0
+
+        key = (resolved_job_id, resolved_job_number, resolved_job_name)
+        bucket = buckets.setdefault(key, {
+            "job_id": resolved_job_id,
+            "job_number": resolved_job_number,
+            "job_name": resolved_job_name,
+            "total_hours": 0.0,
+            "actual_hours": 0.0,
+            "row_count": 0,
+            "task_codes": {},
+        })
+
+        bucket["total_hours"] += hours
+        bucket["actual_hours"] += hours
+        bucket["row_count"] += 1
+        bucket["task_codes"][task_code] = bucket["task_codes"].get(task_code, 0.0) + hours
+
+    results = []
+    for bucket in buckets.values():
+        bucket["total_hours"] = round(bucket["total_hours"], 2)
+        bucket["actual_hours"] = round(bucket["actual_hours"], 2)
+        bucket["task_codes"] = [
+            {"task_code": code, "hours": round(hours, 2)}
+            for code, hours in sorted(bucket["task_codes"].items())
+        ]
+        results.append(bucket)
+
+    return sorted(results, key=lambda item: (item.get("job_number") or "", item.get("job_name") or ""))
+
 
 
 @api_router.get("/reports/hours-by-code")
