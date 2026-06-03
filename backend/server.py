@@ -4433,39 +4433,79 @@ class LabourImportRequest(BaseModel):
 
 
 @api_router.post("/labour/import")
-async def import_labour(data: LabourImportRequest):
+async def import_labour(data: LabourImportRequest, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
     inserted = 0
+    skipped_duplicates = 0
+    skipped_unknown_jobs = 0
+    skipped_missing_job_number = 0
+    issues = []
 
     for row in data.rows:
         job_number = (row.job_number or "").strip()
         task_code_value = (row.task_code or "").strip()
+        source_id_value = (row.source_id or "").strip() if row.source_id else None
 
         if not job_number:
+            skipped_missing_job_number += 1
+            issues.append({
+                "source_id": source_id_value,
+                "reason": "Missing job_number"
+            })
             continue
 
         job = await db.jobs.find_one({"job_number": job_number}, {"_id": 0})
         if not job:
+            skipped_unknown_jobs += 1
+            issues.append({
+                "source_id": source_id_value,
+                "job_number": job_number,
+                "reason": "Unknown FitoutOS job_number"
+            })
             continue
+
+        if source_id_value:
+            existing = await db.actual_labour.find_one(
+                {"source": "timesheet_manager", "source_id": source_id_value},
+                {"_id": 1}
+            )
+            if existing:
+                skipped_duplicates += 1
+                issues.append({
+                    "source_id": source_id_value,
+                    "job_number": job_number,
+                    "reason": "Duplicate source_id already imported"
+                })
+                continue
 
         job_id = job["id"]
 
         labour_doc = {
             "id": str(uuid.uuid4()),
             "job_id": job_id,
+            "job_number": job_number,
             "task_id": None,
             "task_code": task_code_value or None,
             "date": row.date,
             "hours": row.hours,
             "trade": row.trade,
             "source": "timesheet_manager",
-            "source_id": row.source_id,
+            "source_id": source_id_value,
+            "imported_by": user.get("id"),
+            "imported_by_email": user.get("email"),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
 
         await db.actual_labour.insert_one(labour_doc)
         inserted += 1
 
-    return {"inserted": inserted}
+    return {
+        "inserted": inserted,
+        "skipped_duplicates": skipped_duplicates,
+        "skipped_unknown_jobs": skipped_unknown_jobs,
+        "skipped_missing_job_number": skipped_missing_job_number,
+        "issue_count": len(issues),
+        "issues": issues
+    }
 @api_router.post("/jobs/{job_id}/auto-allocate-labour")
 async def auto_allocate_labour(job_id: str):
     rows = await db.actual_labour.find(
