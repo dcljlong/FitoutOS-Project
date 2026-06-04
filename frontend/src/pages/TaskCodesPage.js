@@ -56,6 +56,9 @@ export default function TaskCodesPage() {
   const [editMasterDialogOpen, setEditMasterDialogOpen] = useState(false);
   const [jobCodeDialogOpen, setJobCodeDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // FITOUTOS / TIMESHEET TASK CODE SYNC DRY RUN V1
+  const [syncPreviewLoading, setSyncPreviewLoading] = useState(false);
+  const [syncPreview, setSyncPreview] = useState(null);
 
   const [newMasterCode, setNewMasterCode] = useState(emptyMasterCode);
   const [editingMasterCodeId, setEditingMasterCodeId] = useState(null);
@@ -183,6 +186,24 @@ export default function TaskCodesPage() {
     code.category?.toLowerCase().includes(search.toLowerCase())
   );
 
+  // FITOUTOS / TIMESHEET TASK CODE SYNC DRY RUN V1
+  const handlePreviewTimesheetSync = async () => {
+    setSyncPreviewLoading(true);
+    try {
+      const response = await api.post('/task-codes/timesheet-sync/dry-run');
+      setSyncPreview(response.data);
+      toast.success('Timesheet sync preview loaded');
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      const message = typeof detail === 'string'
+        ? detail
+        : detail?.message || 'Failed to preview Timesheet sync';
+      toast.error(message);
+    } finally {
+      setSyncPreviewLoading(false);
+    }
+  };
+
   const categories = [...new Set(masterCodes.map(c => c.category).filter(Boolean))];
 
   return (
@@ -196,10 +217,22 @@ export default function TaskCodesPage() {
         {isAdmin() && (
           <Dialog open={masterDialogOpen} onOpenChange={setMasterDialogOpen}>
             <DialogTrigger asChild>
-              <Button data-testid="add-master-code-btn">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Master Code
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePreviewTimesheetSync}
+                  disabled={syncPreviewLoading}
+                  data-testid="preview-timesheet-sync-btn"
+                >
+                  {syncPreviewLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Preview Timesheet Sync
+                </Button>
+                <Button data-testid="add-master-code-btn">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Master Code
+                </Button>
+              </div>
             </DialogTrigger>
             <DialogContent>
               <form onSubmit={handleCreateMasterCode}>
@@ -376,6 +409,66 @@ export default function TaskCodesPage() {
         ))}
       </datalist>
 
+      {/* FITOUTOS / TIMESHEET TASK CODE SYNC DRY RUN V1 */}
+      {syncPreview && (
+        <Card data-testid="timesheet-sync-preview-card">
+          <CardHeader>
+            <CardTitle className="text-lg">Timesheet Sync Preview</CardTitle>
+            <CardDescription>
+              Dry-run only. No Timesheet task codes were changed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground">Sent</div>
+                <div className="text-xl font-bold">{syncPreview.sent ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground">Create</div>
+                <div className="text-xl font-bold">{syncPreview.timesheet_response?.created ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground">Update</div>
+                <div className="text-xl font-bold">{syncPreview.timesheet_response?.updated ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground">Unchanged</div>
+                <div className="text-xl font-bold">{syncPreview.timesheet_response?.unchanged ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground">Skipped</div>
+                <div className="text-xl font-bold">{syncPreview.timesheet_response?.skipped ?? 0}</div>
+              </div>
+            </div>
+
+            <div className="text-xs text-muted-foreground">
+              New Timesheet codes default to Smartly export disabled until reviewed in Timesheet Manager.
+            </div>
+
+            <div className="max-h-64 overflow-auto rounded-md border">
+              <table className="data-table text-sm">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Description</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(syncPreview.timesheet_response?.preview || []).slice(0, 25).map((item, index) => (
+                    <tr key={`${item.code}-${index}`}>
+                      <td className="font-mono font-bold">{item.code}</td>
+                      <td>{item.description}</td>
+                      <td>{item.action}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {/* Tabs */}
       <Tabs defaultValue="master" className="space-y-4">
         <TabsList>

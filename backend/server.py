@@ -16,6 +16,7 @@ import bcrypt
 import jwt
 import json
 import xlrd
+import httpx
 try:
     EMERGENT_AVAILABLE = True
 except ImportError:
@@ -938,6 +939,80 @@ async def get_fallback_task_codes(user: dict = Depends(get_current_user)):
     """Get global fallback task codes for non-job-specific entries"""
     codes = await db.master_task_codes.find({"is_global_fallback": True, "is_active": True}, {"_id": 0}).to_list(100)
     return [MasterTaskCodeResponse(**c) for c in codes]
+
+
+# FITOUTOS / TIMESHEET TASK CODE SYNC DRY RUN V1
+@api_router.post("/task-codes/timesheet-sync/dry-run")
+async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(UserRole.ADMIN))):
+    timesheet_api_base = (os.environ.get("TIMESHEET_MANAGER_API_BASE_URL") or "").strip().rstrip("/")
+    sync_token = (os.environ.get("FITOUTOS_TASK_CODE_SYNC_TOKEN") or "").strip()
+
+    if not timesheet_api_base:
+        raise HTTPException(status_code=503, detail="TIMESHEET_MANAGER_API_BASE_URL is not configured")
+
+    if not sync_token:
+        raise HTTPException(status_code=503, detail="FITOUTOS_TASK_CODE_SYNC_TOKEN is not configured")
+
+    master_codes = await db.master_task_codes.find(
+        {"is_active": True},
+        {"_id": 0}
+    ).sort("code", 1).to_list(1000)
+
+    payload_codes = []
+    for code in master_codes:
+        code_value = str(code.get("code") or "").strip()
+        if not code_value:
+            continue
+
+        payload_codes.append({
+            "code": code_value,
+            "name": str(code.get("name") or "").strip(),
+            "description": str(code.get("description") or code.get("name") or code_value).strip(),
+            "category": str(code.get("category") or "").strip(),
+        })
+
+    payload = {
+        "source": "fitoutos-master-task-codes",
+        "dry_run": True,
+        "codes": payload_codes
+    }
+
+    target_url = f"{timesheet_api_base}/task-codes/sync-from-fitoutos"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                target_url,
+                json=payload,
+                headers={"X-FitoutOS-Sync-Token": sync_token}
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not contact Timesheet Manager task-code sync endpoint: {str(exc)}"
+        )
+
+    try:
+        response_body = response.json()
+    except Exception:
+        response_body = {"raw": response.text}
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Timesheet Manager task-code dry-run sync failed",
+                "status_code": response.status_code,
+                "response": response_body
+            }
+        )
+
+    return {
+        "target": "timesheet-manager",
+        "dry_run": True,
+        "sent": len(payload_codes),
+        "timesheet_response": response_body
+    }
 
 
 # ============== JOB TASK CODES ==============
