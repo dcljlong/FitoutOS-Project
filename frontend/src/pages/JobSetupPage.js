@@ -1741,7 +1741,73 @@ try {
           </div>
 
 
+          {/* FITOUTOS / DOCUMENT INTAKE REVIEW DIAGNOSTICS V1 */}
+          {(analysis?.document_intake || analysis?.extracted_text_preview || analysis?.analysis_warnings?.length > 0) && (
+            <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20">
+              <CardHeader>
+                <CardTitle className="text-base">Document Intake Diagnostics</CardTitle>
+                <CardDescription>
+                  Shows what FitoutOS could read from the uploaded PDF/DOCX and why structured rows may be empty.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Files Uploaded</p>
+                    <p className="text-lg font-semibold">{analysis?.document_intake?.files_uploaded ?? 0}</p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Readable Files</p>
+                    <p className="text-lg font-semibold">{analysis?.document_intake?.readable_files?.length ?? 0}</p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Extracted Characters</p>
+                    <p className="text-lg font-semibold">{analysis?.document_intake?.extracted_character_count ?? 0}</p>
+                  </div>
+                </div>
 
+                {analysis?.document_intake?.extraction_diagnostics?.length > 0 && (
+                  <div>
+                    <p className="font-medium mb-2">File diagnostics</p>
+                    <div className="space-y-2">
+                      {analysis.document_intake.extraction_diagnostics.map((item, index) => (
+                        <div key={index} className="rounded-md border bg-background p-3 text-sm">
+                          <p className="font-medium">{item.filename || 'Unnamed file'}</p>
+                          <p className="text-muted-foreground">
+                            {item.extension || 'unknown'} · {item.status || 'unknown'} · {item.characters ?? 0} characters
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(analysis?.document_intake?.extraction_errors?.length > 0 || analysis?.analysis_warnings?.length > 0) && (
+                  <div>
+                    <p className="font-medium mb-2">Warnings</p>
+                    <div className="space-y-2">
+                      {(analysis?.document_intake?.extraction_errors || analysis?.analysis_warnings || []).map((item, index) => (
+                        <div key={index} className="rounded-md border border-amber-300 bg-amber-100/60 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                          {item?.filename ? `${item.filename}: ${item.error || 'Unreadable file'}` : String(item)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {analysis?.extracted_text_preview && (
+                  <div>
+                    <p className="font-medium mb-2">Extracted text preview</p>
+                    <ScrollArea className="h-[260px] rounded-md border bg-background p-3">
+                      <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono">
+                        {analysis.extracted_text_preview}
+                      </pre>
+                    </ScrollArea>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
 
           <Tabs defaultValue="summary" className="space-y-4">
