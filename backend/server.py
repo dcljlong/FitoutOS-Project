@@ -2392,43 +2392,149 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
 
     files = await db.job_files.find({"job_id": job_id}, {"_id": 0}).to_list(100)
 
+    # FITOUTOS / DOCUMENT INTAKE EXTRACTION DIAGNOSTICS V1
     extracted_text = ""
     readable_files = []
+    extraction_diagnostics = []
+    extraction_errors = []
+
+    def append_extracted_text(filename, file_ext, text):
+        cleaned_text = (text or "").strip()
+        char_count = len(cleaned_text)
+        extraction_diagnostics.append({
+            "filename": filename,
+            "extension": file_ext,
+            "status": "readable" if char_count > 0 else "empty",
+            "characters": char_count
+        })
+        return cleaned_text
 
     for f in files:
+        filename = f.get("filename") or "unknown"
+        filepath_raw = f.get("filepath") or ""
+        filepath = filepath_raw.lower()
+        file_ext = Path(filename).suffix.lower() or Path(filepath_raw).suffix.lower()
+
         try:
-            filepath = f["filepath"].lower()
+            file_text = ""
 
             if filepath.endswith(".xls"):
                 wb = xlrd.open_workbook(f["filepath"])
+                rows = []
                 for sheet in wb.sheets():
                     for row_idx in range(min(sheet.nrows, 200)):
                         row_values = sheet.row_values(row_idx)
-                        extracted_text += " | ".join([str(v) for v in row_values if str(v).strip()]) + "\n"
-                readable_files.append(f.get("filename"))
+                        row_text = " | ".join([str(v) for v in row_values if str(v).strip()])
+                        if row_text.strip():
+                            rows.append(row_text)
+                file_text = "\n".join(rows)
 
             elif filepath.endswith(".pdf"):
-                import fitz
-                doc = fitz.open(f["filepath"])
-                for page in doc:
-                    extracted_text += page.get_text()
-                readable_files.append(f.get("filename"))
+                pdf_errors = []
+
+                try:
+                    import fitz
+                    doc = fitz.open(f["filepath"])
+                    parts = []
+                    for page in doc:
+                        page_text = page.get_text()
+                        if page_text:
+                            parts.append(page_text)
+                    file_text = "\n".join(parts)
+                except Exception as fitz_error:
+                    pdf_errors.append(f"PyMuPDF failed: {str(fitz_error)}")
+
+                if not file_text.strip():
+                    try:
+                        from pypdf import PdfReader
+                        reader = PdfReader(f["filepath"])
+                        parts = []
+                        for page in reader.pages[:80]:
+                            page_text = page.extract_text() or ""
+                            if page_text.strip():
+                                parts.append(page_text)
+                        file_text = "\n".join(parts)
+                    except Exception as pypdf_error:
+                        pdf_errors.append(f"pypdf failed: {str(pypdf_error)}")
+
+                if not file_text.strip() and pdf_errors:
+                    extraction_errors.append({
+                        "filename": filename,
+                        "extension": file_ext,
+                        "error": " | ".join(pdf_errors)
+                    })
+
+            elif filepath.endswith(".docx"):
+                try:
+                    from docx import Document
+                    doc = Document(f["filepath"])
+                    parts = []
+
+                    for paragraph in doc.paragraphs:
+                        text = paragraph.text.strip()
+                        if text:
+                            parts.append(text)
+
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = " | ".join(
+                                cell.text.strip()
+                                for cell in row.cells
+                                if cell.text and cell.text.strip()
+                            )
+                            if row_text:
+                                parts.append(row_text)
+
+                    file_text = "\n".join(parts)
+                except Exception as docx_error:
+                    extraction_errors.append({
+                        "filename": filename,
+                        "extension": file_ext,
+                        "error": f"DOCX extraction failed: {str(docx_error)}"
+                    })
 
             elif filepath.endswith(".xlsx"):
                 from openpyxl import load_workbook
                 wb = load_workbook(f["filepath"], data_only=True)
+                rows = []
                 for sheet in wb.worksheets:
                     for row in sheet.iter_rows(values_only=True):
-                        extracted_text += " | ".join([str(v) for v in row if v is not None and str(v).strip()]) + "\n"
-                readable_files.append(f.get("filename"))
+                        row_text = " | ".join([str(v) for v in row if v is not None and str(v).strip()])
+                        if row_text.strip():
+                            rows.append(row_text)
+                file_text = "\n".join(rows)
+
+            elif filepath.endswith(".csv") or filepath.endswith(".txt"):
+                with open(f["filepath"], "rb") as fh:
+                    file_text = fh.read().decode(errors="ignore")
 
             else:
-                with open(f["filepath"], "rb") as fh:
-                    content = fh.read().decode(errors="ignore")
-                    extracted_text += content[:10000]
-                readable_files.append(f.get("filename"))
+                extraction_diagnostics.append({
+                    "filename": filename,
+                    "extension": file_ext,
+                    "status": "reference_only",
+                    "characters": 0
+                })
+                continue
 
-        except Exception:
+            file_text = append_extracted_text(filename, file_ext, file_text)
+
+            if file_text:
+                extracted_text += f"\n\n--- {filename} ---\n{file_text[:20000]}"
+                readable_files.append(filename)
+
+        except Exception as e:
+            extraction_errors.append({
+                "filename": filename,
+                "extension": file_ext,
+                "error": str(e)
+            })
+            extraction_diagnostics.append({
+                "filename": filename,
+                "extension": file_ext,
+                "status": "failed",
+                "characters": 0
+            })
             continue
 
     extracted_text = (extracted_text or "").strip()
@@ -2741,7 +2847,15 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         "risks": risks,
         "ld_risk": ld_risk,
         "contract_split": contract_split,
-        "extracted_text_preview": extracted_text[:4000]
+        "extracted_text_preview": extracted_text[:4000],
+        "document_intake": {
+            "files_uploaded": len(files),
+            "readable_files": readable_files,
+            "extraction_diagnostics": extraction_diagnostics,
+            "extraction_errors": extraction_errors,
+            "extracted_character_count": len(extracted_text)
+        },
+        "analysis_warnings": extraction_errors
     }
 
     analysis_record = {
@@ -5005,44 +5119,3 @@ async def reports_summary():
         "total_tasks": total_tasks,
         "total_timesheets": total_timesheets
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
