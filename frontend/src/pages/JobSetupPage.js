@@ -2600,12 +2600,33 @@ try {
 
           <div className="flex justify-between">
 
-            <Button variant="outline" onClick={() => goToStep(2)} disabled={analyzing}>
-
+            {/* FITOUTOS / REVIEW UPLOAD REPLACE ESCAPE V1 */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAnalysis(null);
+                setProgrammeItems([]);
+                setConfirmedData({ task_codes: [], tasks: [], scope_items: [] });
+                goToStep(1);
+              }}
+              disabled={analyzing || loading}
+            >
               <ArrowLeft className="mr-2 h-4 w-4" />
+              Upload / Replace Documents
+            </Button>
 
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAnalysis(null);
+                setProgrammeItems([]);
+                setConfirmedData({ task_codes: [], tasks: [], scope_items: [] });
+                goToStep(2);
+              }}
+              disabled={analyzing || loading}
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
               Re-analyze
-
             </Button>
 
             <Button onClick={handleConfirm} disabled={loading} data-testid="confirm-setup-btn">
