@@ -4,10 +4,12 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import base64
 import re
 import math
 import logging
 from pathlib import Path
+from io import BytesIO
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 import uuid
@@ -2169,7 +2171,7 @@ async def upload_job_files(
             warnings.append("Image uploaded. OCR pending.")
         elif file_ext in {".docx"}:
             parse_status = "uploaded"
-            warnings.append("DOCX uploaded. Parsing support to be expanded.")
+            warnings.append("DOCX uploaded. Text extraction enabled.")
         elif file_ext in {".mpp"}:
             parse_status = "uploaded"
             warnings.append("MPP uploaded. Programme parsing enabled.")
@@ -2189,6 +2191,9 @@ async def upload_job_files(
             "extension": file_ext,
             "content_type": file.content_type,
             "size": len(content),
+            # FITOUTOS / DURABLE DOCUMENT BYTES V1
+            "content_base64": base64.b64encode(content).decode("ascii") if file_ext in {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"} and len(content) <= 12 * 1024 * 1024 else None,
+            "content_storage": "mongodb_base64" if file_ext in {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"} and len(content) <= 12 * 1024 * 1024 else "local_path_only",
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "uploaded_by": user["id"],
             "parse_status": parse_status,
@@ -2405,9 +2410,30 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
             "filename": filename,
             "extension": file_ext,
             "status": "readable" if char_count > 0 else "empty",
-            "characters": char_count
+            "characters": char_count,
+            "source": locals().get("byte_source") or "unknown"
         })
         return cleaned_text
+
+    def load_uploaded_file_bytes(file_record, filename, file_ext):
+        """Load uploaded document bytes from Mongo first, then local path as fallback."""
+        content_base64 = file_record.get("content_base64")
+        if content_base64:
+            try:
+                return base64.b64decode(content_base64), "mongodb_base64"
+            except Exception as decode_error:
+                extraction_errors.append({
+                    "filename": filename,
+                    "extension": file_ext,
+                    "error": f"Stored upload bytes could not be decoded: {str(decode_error)}"
+                })
+
+        filepath_raw = file_record.get("filepath") or file_record.get("stored_path") or ""
+        if filepath_raw and os.path.exists(filepath_raw):
+            with open(filepath_raw, "rb") as fh:
+                return fh.read(), "local_path"
+
+        raise FileNotFoundError(f"Uploaded file content is unavailable. Local path missing: {filepath_raw or 'not recorded'}")
 
     for f in files:
         filename = f.get("filename") or "unknown"
@@ -2417,9 +2443,14 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
 
         try:
             file_text = ""
+            file_bytes = None
+            byte_source = None
 
-            if filepath.endswith(".xls"):
-                wb = xlrd.open_workbook(f["filepath"])
+            if file_ext in {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"}:
+                file_bytes, byte_source = load_uploaded_file_bytes(f, filename, file_ext)
+
+            if file_ext == ".xls":
+                wb = xlrd.open_workbook(file_contents=file_bytes)
                 rows = []
                 for sheet in wb.sheets():
                     for row_idx in range(min(sheet.nrows, 200)):
@@ -2429,12 +2460,12 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                             rows.append(row_text)
                 file_text = "\n".join(rows)
 
-            elif filepath.endswith(".pdf"):
+            elif file_ext == ".pdf":
                 pdf_errors = []
 
                 try:
                     import fitz
-                    doc = fitz.open(f["filepath"])
+                    doc = fitz.open(stream=file_bytes, filetype="pdf")
                     parts = []
                     for page in doc:
                         page_text = page.get_text()
@@ -2447,7 +2478,7 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                 if not file_text.strip():
                     try:
                         from pypdf import PdfReader
-                        reader = PdfReader(f["filepath"])
+                        reader = PdfReader(BytesIO(file_bytes))
                         parts = []
                         for page in reader.pages[:80]:
                             page_text = page.extract_text() or ""
@@ -2464,10 +2495,10 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                         "error": " | ".join(pdf_errors)
                     })
 
-            elif filepath.endswith(".docx"):
+            elif file_ext == ".docx":
                 try:
                     from docx import Document
-                    doc = Document(f["filepath"])
+                    doc = Document(BytesIO(file_bytes))
                     parts = []
 
                     for paragraph in doc.paragraphs:
@@ -2493,9 +2524,9 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                         "error": f"DOCX extraction failed: {str(docx_error)}"
                     })
 
-            elif filepath.endswith(".xlsx"):
+            elif file_ext == ".xlsx":
                 from openpyxl import load_workbook
-                wb = load_workbook(f["filepath"], data_only=True)
+                wb = load_workbook(BytesIO(file_bytes), data_only=True)
                 rows = []
                 for sheet in wb.worksheets:
                     for row in sheet.iter_rows(values_only=True):
@@ -2504,9 +2535,8 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                             rows.append(row_text)
                 file_text = "\n".join(rows)
 
-            elif filepath.endswith(".csv") or filepath.endswith(".txt"):
-                with open(f["filepath"], "rb") as fh:
-                    file_text = fh.read().decode(errors="ignore")
+            elif file_ext in {".csv", ".txt"}:
+                file_text = file_bytes.decode(errors="ignore")
 
             else:
                 extraction_diagnostics.append({
