@@ -958,6 +958,48 @@ async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(Us
         {"_id": 0}
     ).sort("code", 1).to_list(1000)
 
+    # FITOUTOS / TIMESHEET TASK CODE SYNC JOB MAPPINGS V1
+    active_jobs = await db.jobs.find(
+        {"status": {"$ne": "deleted"}},
+        {"_id": 0, "id": 1, "job_number": 1, "job_name": 1}
+    ).to_list(5000)
+
+    jobs_by_id = {
+        str(job.get("id") or "").strip(): job
+        for job in active_jobs
+        if str(job.get("id") or "").strip()
+    }
+
+    job_task_code_rows = await db.job_task_codes.find(
+        {"is_active": True},
+        {"_id": 0}
+    ).to_list(5000)
+
+    payload_job_task_codes = []
+    for row in job_task_code_rows:
+        job_id = str(row.get("job_id") or "").strip()
+        job = jobs_by_id.get(job_id)
+        if not job:
+            continue
+
+        job_number = str(job.get("job_number") or "").strip()
+        code_value = str(row.get("code") or "").strip()
+
+        if not job_number or not code_value:
+            continue
+
+        description = str(
+            row.get("custom_label")
+            or row.get("name")
+            or code_value
+        ).strip()
+
+        payload_job_task_codes.append({
+            "job_number": job_number,
+            "code": code_value,
+            "description": description,
+            "active": bool(row.get("is_active", True)),
+        })
     payload_codes = []
     for code in master_codes:
         code_value = str(code.get("code") or "").strip()
@@ -974,7 +1016,8 @@ async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(Us
     payload = {
         "source": "fitoutos-master-task-codes",
         "dry_run": True,
-        "codes": payload_codes
+        "codes": payload_codes,
+        "job_task_codes": payload_job_task_codes
     }
 
     target_url = f"{timesheet_api_base}/task-codes/sync-from-fitoutos"
@@ -1011,6 +1054,7 @@ async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(Us
         "target": "timesheet-manager",
         "dry_run": True,
         "sent": len(payload_codes),
+        "sent_job_task_codes": len(payload_job_task_codes),
         "timesheet_response": response_body
     }
 
