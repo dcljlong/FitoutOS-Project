@@ -2184,3 +2184,158 @@ html:not(.dark) .fo-main-content textarea {
   }
 }
 /* === FITOUTOS MOBILE CONTAINMENT V1 END === */
+
+/* === FITOUTOS MOBILE CONTAINMENT V2 START ===
+   Real-device fix after iPhone proof showed the shell/dashboard still wider than viewport.
+   Keep top shell, dashboard, job cards, action rows, and page background clipped to viewport.
+   Desktop preserved by max-width media scope.
+*/
+@media (max-width: 768px) {
+  html {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  body {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: clip !important;
+    background: hsl(var(--background)) !important;
+  }
+
+  #root,
+  .fo-app-shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: clip !important;
+    background: inherit;
+  }
+
+  .fo-top-nav,
+  .fo-top-nav-inner,
+  .fo-shell-grid,
+  .fo-main-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  .fo-top-nav-inner {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    gap: 0.5rem !important;
+    flex-wrap: wrap !important;
+  }
+
+  .fo-nav-left,
+  .fo-brand-link,
+  .fo-brand-copy {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .fo-brand-link {
+    flex: 1 1 auto !important;
+    overflow: hidden !important;
+  }
+
+  .fo-brand-title,
+  .fo-brand-subtitle,
+  .fo-brand-kicker {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .fo-nav-user {
+    flex: 0 0 auto !important;
+    max-width: 100% !important;
+  }
+
+  .fo-mobile-nav {
+    flex: 0 0 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;
+  }
+
+  .fo-mobile-nav-link,
+  .fo-mobile-suite-link {
+    flex: 0 0 auto !important;
+    max-width: calc(100vw - 1.5rem) !important;
+  }
+
+  .fo-shell-grid {
+    display: block !important;
+    padding: 0 !important;
+  }
+
+  .fo-main-content {
+    display: block !important;
+    padding: 1rem 0.75rem 1.5rem !important;
+  }
+
+  .dashboard-grid,
+  .grid {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .fo-main-content > *,
+  .fo-main-content section,
+  .fo-main-content article,
+  .fo-main-content form,
+  .fo-main-content .rounded-lg,
+  .fo-main-content .rounded-xl,
+  .fo-main-content .rounded-2xl,
+  .fo-main-content [class*="grid"],
+  .fo-main-content [class*="flex"] {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .fo-main-content .grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .fo-main-content .flex {
+    flex-wrap: wrap !important;
+  }
+
+  .fo-main-content button,
+  .fo-main-content a,
+  .fo-main-content input,
+  .fo-main-content select,
+  .fo-main-content textarea {
+    max-width: 100% !important;
+  }
+
+  .fo-main-content pre,
+  .fo-main-content code,
+  .fo-main-content [data-radix-scroll-area-viewport] {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
+  }
+}
+/* === FITOUTOS MOBILE CONTAINMENT V2 END === */
