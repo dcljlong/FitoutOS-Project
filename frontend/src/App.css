@@ -2026,3 +2026,161 @@ html:not(.dark) .fo-main-content textarea {
   }
 }
 /* FITOUTOS / LOGOUT ALIGNMENT MATCH LLD V6F END */
+
+/* === FITOUTOS MOBILE CONTAINMENT V1 START ===
+   Frontend-only mobile containment.
+   Purpose:
+   - stop mobile horizontal page drift
+   - keep the mobile nav scrolling inside itself
+   - keep review cards, diagnostics, tab lists, previews, and action rows inside viewport
+   - preserve desktop layout by scoping all changes to mobile width
+*/
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    position: relative;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  #root,
+  .App,
+  .app,
+  .fo-app,
+  .fo-shell,
+  .fo-app-shell,
+  .fo-layout,
+  .fo-page,
+  .fo-main,
+  .fo-main-content,
+  .fo-content,
+  .fo-desktop-content,
+  .fo-mobile-content,
+  main {
+    min-width: 0;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .fo-mobile-nav {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .fo-mobile-nav > *,
+  .fo-mobile-nav a,
+  .fo-mobile-nav button {
+    flex: 0 0 auto;
+    max-width: calc(100vw - 2rem);
+    white-space: nowrap;
+  }
+
+  .fo-mobile-nav + *,
+  .fo-page > *,
+  main > *,
+  section,
+  article {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .fo-card,
+  .card,
+  [class*="Card"],
+  [class*="card"],
+  [class*="panel"],
+  [class*="Panel"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  [role="tablist"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    display: flex !important;
+    grid-template-columns: none !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  [role="tablist"] [role="tab"] {
+    flex: 0 0 auto;
+    min-width: max-content;
+    white-space: nowrap;
+  }
+
+  [data-radix-scroll-area-viewport],
+  pre,
+  code,
+  textarea {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  pre,
+  .whitespace-pre,
+  .whitespace-pre-wrap {
+    white-space: pre-wrap !important;
+  }
+
+  table {
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+
+  img,
+  svg,
+  canvas,
+  iframe {
+    max-width: 100%;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    max-width: 100%;
+  }
+
+  .flex.justify-end,
+  .flex.justify-between,
+  .flex.items-center.justify-between {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .flex.justify-end > button,
+  .flex.justify-between > button {
+    flex: 1 1 100%;
+  }
+}
+/* === FITOUTOS MOBILE CONTAINMENT V1 END === */
