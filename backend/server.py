@@ -2637,6 +2637,28 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         return None
 
     raw_extracted_lines = [line.strip() for line in extracted_text.splitlines()]
+
+    # FITOUTOS / JOB CONTEXT ANALYSIS FILTER V2
+    # Derive contract hint from uploaded document lines as well as the saved FitoutOS job record.
+    document_contract_hint = None
+    if target_job_number:
+        for candidate_line in raw_extracted_lines:
+            candidate_lower = candidate_line.lower()
+            if target_job_number in candidate_line:
+                if any(term in candidate_lower for term in ["basebuild", "base build", "base-build"]):
+                    document_contract_hint = "basebuild"
+                    break
+                if any(term in candidate_lower for term in ["fitout", "fit out", "craigs"]):
+                    document_contract_hint = "fitout"
+                    break
+
+    if document_contract_hint and document_contract_hint != current_contract_hint:
+        current_contract_hint = document_contract_hint
+
+    if current_contract_hint == "basebuild":
+        other_contract_terms = ["craigs", "craigs fitout", "fitout contract", "fit out contract", "4177"]
+    elif current_contract_hint == "fitout":
+        other_contract_terms = ["basebuild", "base build", "base-build", "basebuild contract", "4009"]
     filtered_extracted_lines = []
 
     for line in raw_extracted_lines:
@@ -2956,6 +2978,7 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                 "job_name": target_job_name,
                 "site_address": target_site_address,
                 "contract_hint": current_contract_hint,
+                "document_contract_hint": document_contract_hint,
                 "filtered_content_length": len(job_context_filtered_text),
                 "skipped_other_contract_count": len(skipped_other_contract_content)
             }
