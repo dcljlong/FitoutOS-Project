@@ -4023,10 +4023,15 @@ async def confirm_job_analysis(
             }
             await db.job_programme.insert_one(programme_row)
 
+    # FITOUTOS / CONFIRM SAVE TASK CODE ID REPAIR V1
+    # Older master_task_codes rows may not have id; ensure they can be linked to job_task_codes.
     if "task_codes" in confirmed_data:
         for code_data in confirmed_data["task_codes"]:
             if isinstance(code_data, str):
                 code_data = {"code": code_data}
+
+            if not isinstance(code_data, dict):
+                continue
 
             code_value = str(code_data.get("code") or "").strip()
             if not code_value:
@@ -4059,32 +4064,57 @@ async def confirm_job_analysis(
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 await db.master_task_codes.insert_one(master_code)
+            else:
+                master_code_id = str(master_code.get("id") or "").strip()
+                master_updates = {}
+                if not master_code_id:
+                    master_code_id = str(uuid.uuid4())
+                    master_updates["id"] = master_code_id
+                    master_code["id"] = master_code_id
+                if code_name and code_name != str(master_code.get("name") or "").strip():
+                    master_updates["name"] = code_name
+                    master_code["name"] = code_name
+                if code_description and code_description != str(master_code.get("description") or "").strip():
+                    master_updates["description"] = code_description
+                    master_code["description"] = code_description
+                if master_updates:
+                    await db.master_task_codes.update_one(
+                        {"code": code_value},
+                        {"$set": master_updates}
+                    )
+
+            master_code_id = str(master_code.get("id") or "").strip()
+            if not master_code_id:
+                continue
 
             job_specific_label = code_name if code_name and code_name != code_value else None
 
-            if master_code:
-                existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code["id"]})
-                if existing:
-                    update_fields = {"is_active": True}
-                    if job_specific_label:
-                        update_fields["custom_label"] = job_specific_label
-                    await db.job_task_codes.update_one(
-                        {"id": existing["id"]},
-                        {"$set": update_fields}
-                    )
-                else:
-                    job_code = {
-                        "id": str(uuid.uuid4()),
-                        "job_id": job_id,
-                        "master_code_id": master_code["id"],
-                        "code": master_code["code"],
-                        "name": master_code.get("name") or code_name,
-                        "custom_label": job_specific_label,
-                        "is_active": True,
-                        "created_at": datetime.now(timezone.utc).isoformat()
-                    }
-                    await db.job_task_codes.insert_one(job_code)
-                    created_items["task_codes"] += 1
+            existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code_id})
+            if existing:
+                update_fields = {
+                    "code": code_value,
+                    "name": master_code.get("name") or code_name,
+                    "is_active": True
+                }
+                if job_specific_label:
+                    update_fields["custom_label"] = job_specific_label
+                await db.job_task_codes.update_one(
+                    {"id": existing["id"]},
+                    {"$set": update_fields}
+                )
+            else:
+                job_code = {
+                    "id": str(uuid.uuid4()),
+                    "job_id": job_id,
+                    "master_code_id": master_code_id,
+                    "code": code_value,
+                    "name": master_code.get("name") or code_name,
+                    "custom_label": job_specific_label,
+                    "is_active": True,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.job_task_codes.insert_one(job_code)
+                created_items["task_codes"] += 1
 
     if "tasks" in confirmed_data:
         for task_data in confirmed_data["tasks"]:
