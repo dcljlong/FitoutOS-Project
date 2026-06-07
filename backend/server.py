@@ -2571,8 +2571,99 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
     if not extracted_text:
         extracted_text = "No readable document content."
 
-    text_lower = extracted_text.lower()
-    raw_lines = [line.strip() for line in extracted_text.splitlines()]
+    # FITOUTOS / JOB CONTEXT ANALYSIS FILTER V1
+    # Keep analysis contract-specific when one physical site has multiple FitoutOS jobs.
+    # Example: job 4009 Basebuild should not generate scope/task rows from job 4177 Craigs Fitout.
+    target_job_number = str(job.get("job_number") or "").strip()
+    target_job_name = str(job.get("job_name") or "").strip()
+    target_site_address = str(job.get("site_address") or "").strip()
+
+    job_context_warnings = []
+    skipped_other_contract_content = []
+
+    def _job_context_terms(value):
+        return [
+            token.strip().lower()
+            for token in str(value or "").replace("/", " ").replace("-", " ").split()
+            if len(token.strip()) >= 4
+        ]
+
+    target_terms = set()
+    target_terms.update(_job_context_terms(target_job_name))
+    target_terms.update(_job_context_terms(target_site_address))
+
+    job_context_label = " ".join(
+        part for part in [target_job_number, target_job_name, target_site_address] if part
+    ).strip()
+
+    job_context_text = f"{target_job_number} {target_job_name} {target_site_address}".lower()
+
+    current_contract_hint = None
+    if any(term in job_context_text for term in ["basebuild", "base build", "base-build", "base build contract"]):
+        current_contract_hint = "basebuild"
+    elif any(term in job_context_text for term in ["fitout", "fit out", "craigs"]):
+        current_contract_hint = "fitout"
+
+    other_contract_terms = []
+    if current_contract_hint == "basebuild":
+        other_contract_terms = ["craigs", "craigs fitout", "fitout contract", "fit out contract", "4177"]
+    elif current_contract_hint == "fitout":
+        other_contract_terms = ["basebuild", "base build", "base-build", "basebuild contract", "4009"]
+
+    import re as _fitoutos_job_context_re
+
+    def _other_contract_reason(line):
+        line_text = str(line or "").strip()
+        if not line_text:
+            return None
+
+        line_lower = line_text.lower()
+        has_target_job_number = bool(target_job_number and target_job_number in line_text)
+        has_target_term = any(term in line_lower for term in target_terms)
+
+        job_numbers_in_line = _fitoutos_job_context_re.findall(r"\b\d{4,6}\b", line_text)
+        other_job_numbers = [
+            number for number in job_numbers_in_line
+            if target_job_number and number != target_job_number
+        ]
+
+        if other_job_numbers and not has_target_job_number and not has_target_term:
+            return f"mentions other job number(s): {', '.join(sorted(set(other_job_numbers)))}"
+
+        if other_contract_terms and any(term in line_lower for term in other_contract_terms):
+            if not has_target_job_number and not has_target_term:
+                return f"appears to be other-contract content for current job context: {job_context_label or target_job_number or 'current job'}"
+
+        return None
+
+    raw_extracted_lines = [line.strip() for line in extracted_text.splitlines()]
+    filtered_extracted_lines = []
+
+    for line in raw_extracted_lines:
+        reason = _other_contract_reason(line)
+        if reason:
+            skipped_other_contract_content.append({
+                "line": line[:500],
+                "reason": reason
+            })
+            continue
+        filtered_extracted_lines.append(line)
+
+    job_context_filtered_text = "\n".join(filtered_extracted_lines).strip()
+    if not job_context_filtered_text:
+        job_context_filtered_text = extracted_text
+
+    if skipped_other_contract_content:
+        job_context_warnings.append({
+            "type": "skipped_other_contract_content",
+            "message": f"Skipped {len(skipped_other_contract_content)} line(s) that appeared to belong to another job/contract.",
+            "job_number": target_job_number,
+            "job_name": target_job_name,
+            "sample": skipped_other_contract_content[:10]
+        })
+
+    text_lower = job_context_filtered_text.lower()
+    raw_lines = [line.strip() for line in job_context_filtered_text.splitlines()]
     lines_clean = [line for line in raw_lines if line and len(line) > 3]
 
     package_keywords = {
@@ -2859,7 +2950,15 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
             "job_number": job.get("job_number"),
             "files_reviewed": len(files),
             "readable_files": readable_files,
-            "content_length": len(extracted_text)
+            "content_length": len(extracted_text),
+            "job_context": {
+                "job_number": target_job_number,
+                "job_name": target_job_name,
+                "site_address": target_site_address,
+                "contract_hint": current_contract_hint,
+                "filtered_content_length": len(job_context_filtered_text),
+                "skipped_other_contract_count": len(skipped_other_contract_content)
+            }
         },
         "quote_analysis": {
             "detected_packages": detected_packages,
@@ -2877,15 +2976,17 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         "risks": risks,
         "ld_risk": ld_risk,
         "contract_split": contract_split,
-        "extracted_text_preview": extracted_text[:4000],
+        "extracted_text_preview": job_context_filtered_text[:4000],
         "document_intake": {
             "files_uploaded": len(files),
             "readable_files": readable_files,
             "extraction_diagnostics": extraction_diagnostics,
             "extraction_errors": extraction_errors,
-            "extracted_character_count": len(extracted_text)
+            "extracted_character_count": len(extracted_text),
+            "job_context_filtered_character_count": len(job_context_filtered_text),
+            "skipped_other_contract_content": skipped_other_contract_content[:50]
         },
-        "analysis_warnings": extraction_errors
+        "analysis_warnings": extraction_errors + job_context_warnings
     }
 
     analysis_record = {
