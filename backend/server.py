@@ -1002,6 +1002,21 @@ async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(Us
             "description": description,
             "active": bool(row.get("is_active", True)),
         })
+    # FITOUTOS / TASK CODE SORT AND TIMESHEET LABEL V1
+    # Timesheet receives clean job-specific code + heading labels only.
+    def _fitoutos_payload_task_code_sort_key(row):
+        job_number_text = str((row or {}).get("job_number") or "").strip()
+        code_text = str((row or {}).get("code") or "").strip().upper()
+        code_match = re.match(r"^([A-Z]*)(\d+)([A-Z]*)$", code_text)
+        if code_match:
+            prefix = code_match.group(1) or ""
+            number = int(code_match.group(2))
+            suffix = code_match.group(3) or ""
+            return (job_number_text, 0, prefix, number, suffix, code_text)
+        return (job_number_text, 1, code_text)
+
+    payload_job_task_codes = sorted(payload_job_task_codes, key=_fitoutos_payload_task_code_sort_key)
+
     payload_codes = []
     for code in master_codes:
         code_value = str(code.get("code") or "").strip()
@@ -2909,6 +2924,20 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         for package_name in detected_packages:
             if package_name in task_code_map:
                 proposed_task_codes.append(task_code_map[package_name])
+
+    # FITOUTOS / TASK CODE SORT AND TIMESHEET LABEL V1
+    # Keep review and downstream Timesheet lists in natural task-code order.
+    def _fitoutos_task_code_sort_key(code_info):
+        code_text = str((code_info or {}).get("code") or "").strip().upper()
+        code_match = _fitoutos_job_context_re.match(r"^([A-Z]*)(\d+)([A-Z]*)$", code_text)
+        if code_match:
+            prefix = code_match.group(1) or ""
+            number = int(code_match.group(2))
+            suffix = code_match.group(3) or ""
+            return (0, prefix, number, suffix, code_text)
+        return (1, code_text)
+
+    proposed_task_codes = sorted(proposed_task_codes, key=_fitoutos_task_code_sort_key)
 
     proposed_tasks = []
     for code_info in proposed_task_codes:
