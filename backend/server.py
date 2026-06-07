@@ -2864,10 +2864,51 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
                     })
                     seen_materials.add(material_keyword)
 
+    # FITOUTOS / DYNAMIC DOCUMENT TASK CODES V1
+    # Prefer explicit job-specific task-code rows from the filtered uploaded document.
+    # Examples: "101 – Suspended Grid and Tile", "110 - Ambitec PF02 Sheets", "P&G - Prelims".
+    explicit_task_codes = []
+    seen_explicit_task_codes = set()
+
+    task_code_line_pattern = r"^\s*([A-Z]?[0-9]{2,6}[A-Z]?|[A-Z][A-Z0-9&/]{1,12})\s*[-–—]\s+(.+?)\s*$"
+
+    for line in lines_clean:
+        task_code_match = _fitoutos_job_context_re.match(
+            task_code_line_pattern,
+            line,
+            _fitoutos_job_context_re.IGNORECASE
+        )
+        if not task_code_match:
+            continue
+
+        code_value = str(task_code_match.group(1) or "").strip()
+        code_label = str(task_code_match.group(2) or "").strip()
+
+        if not code_value or not code_label:
+            continue
+
+        code_key = code_value.upper()
+        if code_key in seen_explicit_task_codes:
+            continue
+
+        explicit_task_codes.append({
+            "code": code_value,
+            "name": code_label,
+            "description": line,
+            "reason": "Detected from uploaded document task-code line.",
+            "source": "document_explicit_task_code",
+            "source_line": line,
+            "confidence": "high"
+        })
+        seen_explicit_task_codes.add(code_key)
+
     proposed_task_codes = []
-    for package_name in detected_packages:
-        if package_name in task_code_map:
-            proposed_task_codes.append(task_code_map[package_name])
+    if explicit_task_codes:
+        proposed_task_codes = explicit_task_codes
+    else:
+        for package_name in detected_packages:
+            if package_name in task_code_map:
+                proposed_task_codes.append(task_code_map[package_name])
 
     proposed_tasks = []
     for code_info in proposed_task_codes:
@@ -3957,13 +3998,31 @@ async def confirm_job_analysis(
         for code_data in confirmed_data["task_codes"]:
             if isinstance(code_data, str):
                 code_data = {"code": code_data}
-            master_code = await db.master_task_codes.find_one({"code": code_data["code"]})
+
+            code_value = str(code_data.get("code") or "").strip()
+            if not code_value:
+                continue
+
+            code_name = str(
+                code_data.get("custom_label")
+                or code_data.get("name")
+                or code_data.get("description")
+                or code_value.replace("-", " ").replace("_", " ").title()
+            ).strip()
+
+            code_description = str(
+                code_data.get("description")
+                or code_data.get("reason")
+                or code_name
+            ).strip()
+
+            master_code = await db.master_task_codes.find_one({"code": code_value})
             if not master_code:
                 master_code = {
                     "id": str(uuid.uuid4()),
-                    "code": code_data["code"],
-                    "name": code_data.get("name") or code_data["code"].replace("-", " ").replace("_", " ").title(),
-                    "description": code_data.get("reason"),
+                    "code": code_value,
+                    "name": code_name,
+                    "description": code_description,
                     "trade": code_data.get("trade"),
                     "phase": code_data.get("phase"),
                     "is_global_fallback": False,
@@ -3971,16 +4030,27 @@ async def confirm_job_analysis(
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 await db.master_task_codes.insert_one(master_code)
+
+            job_specific_label = code_name if code_name and code_name != code_value else None
+
             if master_code:
                 existing = await db.job_task_codes.find_one({"job_id": job_id, "master_code_id": master_code["id"]})
-                if not existing:
+                if existing:
+                    update_fields = {"is_active": True}
+                    if job_specific_label:
+                        update_fields["custom_label"] = job_specific_label
+                    await db.job_task_codes.update_one(
+                        {"id": existing["id"]},
+                        {"$set": update_fields}
+                    )
+                else:
                     job_code = {
                         "id": str(uuid.uuid4()),
                         "job_id": job_id,
                         "master_code_id": master_code["id"],
                         "code": master_code["code"],
-                        "name": master_code["name"],
-                        "custom_label": None,
+                        "name": master_code.get("name") or code_name,
+                        "custom_label": job_specific_label,
                         "is_active": True,
                         "created_at": datetime.now(timezone.utc).isoformat()
                     }
