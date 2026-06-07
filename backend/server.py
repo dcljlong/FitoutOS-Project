@@ -2645,7 +2645,7 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         for candidate_line in raw_extracted_lines:
             candidate_lower = candidate_line.lower()
             if target_job_number in candidate_line:
-                if any(term in candidate_lower for term in ["basebuild", "base build", "base-build"]):
+                if any(term in candidate_lower for term in ["basebuild", "base build", "base-build", "bsebuild"]):
                     document_contract_hint = "basebuild"
                     break
                 if any(term in candidate_lower for term in ["fitout", "fit out", "craigs"]):
@@ -2658,19 +2658,67 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
     if current_contract_hint == "basebuild":
         other_contract_terms = ["craigs", "craigs fitout", "fitout contract", "fit out contract", "4177"]
     elif current_contract_hint == "fitout":
-        other_contract_terms = ["basebuild", "base build", "base-build", "basebuild contract", "4009"]
+        other_contract_terms = ["basebuild", "base build", "base-build", "basebuild contract", "bsebuild", "4009"]
+
+    # FITOUTOS / JOB CONTEXT ANALYSIS FILTER V3
+    # Section-aware filter: once an other-contract heading is found, skip that section until a current-contract heading appears.
+    def _line_contract_hint(line):
+        line_text = str(line or "").strip()
+        if not line_text:
+            return None
+
+        line_lower = line_text.lower()
+        mentions_basebuild = any(term in line_lower for term in ["basebuild", "base build", "base-build", "bsebuild"])
+        mentions_fitout = any(term in line_lower for term in ["fitout", "fit out", "craigs"])
+        mentions_4009 = "4009" in line_text
+        mentions_4177 = "4177" in line_text
+
+        if mentions_4009 or mentions_basebuild:
+            return "basebuild"
+
+        if mentions_4177:
+            return "fitout"
+
+        if line_lower.startswith("fitout ") or line_lower.startswith("fit out ") or line_lower.startswith("craigs "):
+            return "fitout"
+
+        if mentions_fitout and not mentions_basebuild:
+            return "fitout"
+
+        return None
+
+    def _line_is_current_contract_override(line):
+        line_lower = str(line or "").lower()
+        if current_contract_hint == "basebuild":
+            return any(term in line_lower for term in ["part of basebuild", "part of bsebuild", "apart of basebuild", "apart of bsebuild", "basebuild", "bsebuild", "4009"])
+        if current_contract_hint == "fitout":
+            return any(term in line_lower for term in ["fitout", "fit out", "craigs", "4177"])
+        return False
+
     filtered_extracted_lines = []
+    active_other_contract_section = None
 
     for line in raw_extracted_lines:
+        line_hint = _line_contract_hint(line)
+
+        if current_contract_hint and line_hint == current_contract_hint:
+            active_other_contract_section = None
+        elif current_contract_hint and line_hint and line_hint != current_contract_hint:
+            active_other_contract_section = line_hint
+
         reason = _other_contract_reason(line)
+
+        if active_other_contract_section and not _line_is_current_contract_override(line):
+            reason = reason or f"inside other-contract section: {active_other_contract_section}"
+
         if reason:
             skipped_other_contract_content.append({
                 "line": line[:500],
                 "reason": reason
             })
             continue
-        filtered_extracted_lines.append(line)
 
+        filtered_extracted_lines.append(line)
     job_context_filtered_text = "\n".join(filtered_extracted_lines).strip()
     if not job_context_filtered_text:
         job_context_filtered_text = extracted_text
