@@ -2088,12 +2088,34 @@ try {
 
                             <div className="flex-1 min-w-0">
 
-                              <span className="font-mono font-bold">{typeof code === "string" ? code : code.code}</span>
+                              {/* FITOUTOS / TASK CODES REVIEW DISPLAY V1 */}
+                              {typeof code === "string" ? (
+                                <span className="font-mono font-bold">{code}</span>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-baseline gap-2">
+                                    <span className="font-mono font-bold">{code.code}</span>
+                                    {(code.custom_label || code.name || code.description) && (
+                                      <span className="font-medium">
+                                        {code.custom_label || code.name || code.description}
+                                      </span>
+                                    )}
+                                  </div>
 
-                              {code.reason && (
+                                  {code.reason && (
+                                    <p className="text-sm text-muted-foreground">{code.reason}</p>
+                                  )}
 
-                                <p className="text-sm text-muted-foreground mt-1">{code.reason}</p>
+                                  {code.description && code.description !== code.name && code.description !== code.custom_label && (
+                                    <p className="text-sm text-muted-foreground">{code.description}</p>
+                                  )}
 
+                                  {(code.trade || code.phase) && (
+                                    <p className="text-xs text-muted-foreground">
+                                      {[code.trade, code.phase].filter(Boolean).join(" · ")}
+                                    </p>
+                                  )}
+                                </div>
                               )}
 
                             </div>
