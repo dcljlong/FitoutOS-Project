@@ -2848,6 +2848,8 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
     # FITOUTOS / FITOUT SINGLE-LINE BASEBUILD EXCEPTION V1
     # A Fitout line can explicitly say a single item belongs to Basebuild/Bsebuild.
     # Skip that line, but do not mark the following clean 4177 rows as a Basebuild section.
+    # FITOUTOS / KEEP FITOUT 101 BASEBUILD NOTE V1
+    # Basebuild/Bsebuild wording under a 4177 heading is kept as a Fitout code note; it only prevents section switching.
     for line in raw_extracted_lines:
         line_lower = str(line or "").lower()
 
@@ -2881,8 +2883,6 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
 
         reason = _other_contract_reason(line)
 
-        if has_single_line_basebuild_exception:
-            reason = reason or "line explicitly says this item belongs to Basebuild/Bsebuild, not the Fitout contract"
 
         if active_other_contract_section and not _line_is_current_contract_override(line):
             reason = reason or f"inside other-contract section: {active_other_contract_section}"
