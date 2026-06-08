@@ -2846,6 +2846,9 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
     active_other_contract_section = None
 
     for line in raw_extracted_lines:
+        # FITOUTOS / ANALYSIS LINE_LOWER RUNTIME FIX V1
+        line_lower = str(line or "").lower()
+
         line_hint = _line_contract_hint(line)
 
         if current_contract_hint and line_hint == current_contract_hint:
