@@ -1076,6 +1076,138 @@ async def dry_run_timesheet_task_code_sync(user: dict = Depends(require_roles(Us
     }
 
 
+
+
+# FITOUTOS / TIMESHEET TASK CODE LIVE APPLY V1
+@api_router.post("/task-codes/timesheet-sync/apply")
+async def apply_timesheet_task_code_sync(user: dict = Depends(require_roles(UserRole.ADMIN))):
+    timesheet_api_base = (os.environ.get("TIMESHEET_MANAGER_API_BASE_URL") or "").strip().rstrip("/")
+    sync_token = (os.environ.get("FITOUTOS_TASK_CODE_SYNC_TOKEN") or "").strip()
+
+    if not timesheet_api_base:
+        raise HTTPException(status_code=503, detail="TIMESHEET_MANAGER_API_BASE_URL is not configured")
+
+    if not sync_token:
+        raise HTTPException(status_code=503, detail="FITOUTOS_TASK_CODE_SYNC_TOKEN is not configured")
+
+    master_codes = await db.master_task_codes.find(
+        {"is_active": True},
+        {"_id": 0}
+    ).sort("code", 1).to_list(1000)
+
+    active_jobs = await db.jobs.find(
+        {"status": {"$ne": "deleted"}},
+        {"_id": 0, "id": 1, "job_number": 1, "job_name": 1}
+    ).to_list(5000)
+
+    jobs_by_id = {
+        str(job.get("id") or "").strip(): job
+        for job in active_jobs
+        if str(job.get("id") or "").strip()
+    }
+
+    job_task_code_rows = await db.job_task_codes.find(
+        {"is_active": True},
+        {"_id": 0}
+    ).to_list(5000)
+
+    payload_job_task_codes = []
+    for row in job_task_code_rows:
+        job_id = str(row.get("job_id") or "").strip()
+        job = jobs_by_id.get(job_id)
+        if not job:
+            continue
+
+        job_number = str(job.get("job_number") or "").strip()
+        code_value = str(row.get("code") or "").strip()
+
+        if not job_number or not code_value:
+            continue
+
+        description = str(
+            row.get("custom_label")
+            or row.get("name")
+            or code_value
+        ).strip()
+
+        payload_job_task_codes.append({
+            "job_number": job_number,
+            "code": code_value,
+            "description": description,
+            "active": bool(row.get("is_active", True)),
+        })
+
+    def _fitoutos_payload_task_code_sort_key(row):
+        job_number_text = str((row or {}).get("job_number") or "").strip()
+        code_text = str((row or {}).get("code") or "").strip().upper()
+        code_match = re.match(r"^([A-Z]*)(\d+)([A-Z]*)$", code_text)
+        if code_match:
+            prefix = code_match.group(1) or ""
+            number = int(code_match.group(2))
+            suffix = code_match.group(3) or ""
+            return (job_number_text, 0, prefix, number, suffix, code_text)
+        return (job_number_text, 1, code_text)
+
+    payload_job_task_codes = sorted(payload_job_task_codes, key=_fitoutos_payload_task_code_sort_key)
+
+    payload_codes = []
+    for code in master_codes:
+        code_value = str(code.get("code") or "").strip()
+        if not code_value:
+            continue
+
+        payload_codes.append({
+            "code": code_value,
+            "name": str(code.get("name") or "").strip(),
+            "description": str(code.get("description") or code.get("name") or code_value).strip(),
+            "category": str(code.get("category") or "").strip(),
+        })
+
+    payload = {
+        "source": "fitoutos-master-task-codes",
+        "dry_run": False,
+        "codes": payload_codes,
+        "job_task_codes": payload_job_task_codes
+    }
+
+    target_url = f"{timesheet_api_base}/task-codes/sync-from-fitoutos"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                target_url,
+                json=payload,
+                headers={"X-FitoutOS-Sync-Token": sync_token}
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not contact Timesheet Manager task-code sync endpoint: {str(exc)}"
+        )
+
+    try:
+        response_body = response.json()
+    except Exception:
+        response_body = {"raw": response.text}
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Timesheet Manager task-code live sync failed",
+                "status_code": response.status_code,
+                "response": response_body
+            }
+        )
+
+    return {
+        "target": "timesheet-manager",
+        "dry_run": False,
+        "sent": len(payload_codes),
+        "sent_job_task_codes": len(payload_job_task_codes),
+        "timesheet_response": response_body
+    }
+
 # ============== JOB TASK CODES ==============
 
 @api_router.post("/jobs/{job_id}/task-codes", response_model=JobTaskCodeResponse)
