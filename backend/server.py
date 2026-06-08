@@ -4213,52 +4213,77 @@ async def confirm_job_analysis(
             await db.scope_items.insert_one(scope_item)
             created_items["scope_items"] += 1
 
-    scope_rows = await db.scope_items.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
-    task_rows = await db.tasks.find({"job_id": job_id, "is_internal": True}, {"_id": 0}).to_list(1000)
-    job_task_codes = await db.job_task_codes.find({"job_id": job_id, "is_active": True}, {"_id": 0}).to_list(1000)
+    # FITOUTOS / CONFIRM SAVE NONFATAL LINKING V1
+    # Setup save must not fail just because optional task-code linking or scope-hour allocation fails.
+    post_save_warnings = []
 
-    for task_row in task_rows:
-        if task_row.get("linked_task_codes"):
-            continue
+    try:
+        scope_rows = await db.scope_items.find({"job_id": job_id}, {"_id": 0}).to_list(1000)
+        task_rows = await db.tasks.find({"job_id": job_id, "is_internal": True}, {"_id": 0}).to_list(1000)
+        job_task_codes = await db.job_task_codes.find({"job_id": job_id, "is_active": True}, {"_id": 0}).to_list(1000)
 
-        task_family = detect_task_family(task_row.get("task_name", ""))
-        if task_family == "other":
-            continue
+        for task_row in task_rows:
+            if not isinstance(task_row, dict):
+                continue
 
-        matched_code_ids = [
-            code_row.get("id")
-            for code_row in job_task_codes
-            if code_row.get("id") and detect_task_code_family(code_row.get("code", "")) == task_family
-        ]
+            if task_row.get("linked_task_codes"):
+                continue
 
-        if matched_code_ids:
+            task_family = detect_task_family(task_row.get("task_name", ""))
+            if task_family == "other":
+                continue
+
+            matched_code_ids = [
+                code_row.get("id")
+                for code_row in job_task_codes
+                if isinstance(code_row, dict)
+                and code_row.get("id")
+                and detect_task_code_family(code_row.get("code", "")) == task_family
+            ]
+
+            if matched_code_ids:
+                await db.tasks.update_one(
+                    {"id": task_row["id"]},
+                    {"$set": {"linked_task_codes": matched_code_ids}}
+                )
+                task_row["linked_task_codes"] = matched_code_ids
+
+        allocation_map = build_scope_task_allocation(scope_rows, task_rows)
+
+        for task_row in task_rows:
+            if not isinstance(task_row, dict):
+                continue
+
+            task_id = task_row.get("id")
+            if not task_id:
+                continue
+
+            allocated_hours = allocation_map.get(task_id)
+            if allocated_hours is None:
+                continue
+
             await db.tasks.update_one(
-                {"id": task_row["id"]},
-                {"$set": {"linked_task_codes": matched_code_ids}}
+                {"id": task_id, "job_id": job_id},
+                {"$set": {"quoted_hours": round(float(allocated_hours), 2)}}
             )
-            task_row["linked_task_codes"] = matched_code_ids
 
-    allocation_map = build_scope_task_allocation(scope_rows, task_rows)
-
-    for task_row in task_rows:
-        task_id = task_row.get("id")
-        if not task_id:
-            continue
-        allocated_hours = allocation_map.get(task_id)
-        if allocated_hours is None:
-            continue
-
-        await db.tasks.update_one(
-            {"id": task_id, "job_id": job_id},
-            {"$set": {"quoted_hours": round(allocated_hours, 2)}}
-        )
+    except Exception as post_save_error:
+        post_save_warnings.append(f"Post-save linking/allocation skipped: {str(post_save_error)}")
 
     await db.job_analyses.update_one(
         {"job_id": job_id},
-        {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {
+            "status": "confirmed",
+            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            "post_save_warnings": post_save_warnings
+        }}
     )
 
-    return {"message": "Analysis confirmed and applied", "created": created_items}
+    return {
+        "message": "Analysis confirmed and applied",
+        "created": created_items,
+        "warnings": post_save_warnings
+    }
 
 
 @api_router.post("/jobs/{job_id}/scope-items/apply-hours-to-tasks")
