@@ -2858,20 +2858,27 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
         if active_other_contract_section and not _line_is_current_contract_override(line):
             reason = reason or f"inside other-contract section: {active_other_contract_section}"
 
-        # FITOUTOS / FITOUT SKIP BASEBUILD EXCEPTION LINE V1
-        # A line can mention Fitout but still explicitly belong to Basebuild.
+        # FITOUTOS / STRONG BASEBUILD OWNERSHIP SKIP V1
+        # If the current job is Fitout/Craigs/4177, a line that explicitly says Basebuild/Bsebuild ownership must be skipped.
         # Example: "done in Fitout ... but apart of Bsebuild" must not become a 4177 task code.
-        if current_contract_hint == "fitout":
-            basebuild_exception_terms = [
-                "part of basebuild",
-                "apart of basebuild",
-                "part of bsebuild",
-                "apart of bsebuild",
-                "belongs to basebuild",
-                "belongs to bsebuild"
-            ]
-            if any(term in line_lower for term in basebuild_exception_terms):
-                reason = reason or "line explicitly says this Fitout-mentioned item belongs to Basebuild/Bsebuild"
+        target_is_fitout_contract = (
+            target_job_number == "4177"
+            or "fitout" in job_context_text
+            or "craigs" in job_context_text
+            or current_contract_hint == "fitout"
+        )
+
+        basebuild_ownership_terms = [
+            "part of basebuild",
+            "apart of basebuild",
+            "part of bsebuild",
+            "apart of bsebuild",
+            "belongs to basebuild",
+            "belongs to bsebuild"
+        ]
+
+        if target_is_fitout_contract and any(term in line_lower for term in basebuild_ownership_terms):
+            reason = reason or "line explicitly says this item belongs to Basebuild/Bsebuild, not the Fitout contract"
 
         if reason:
             skipped_other_contract_content.append({
