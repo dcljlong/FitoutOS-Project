@@ -2845,25 +2845,12 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
     filtered_extracted_lines = []
     active_other_contract_section = None
 
+    # FITOUTOS / FITOUT SINGLE-LINE BASEBUILD EXCEPTION V1
+    # A Fitout line can explicitly say a single item belongs to Basebuild/Bsebuild.
+    # Skip that line, but do not mark the following clean 4177 rows as a Basebuild section.
     for line in raw_extracted_lines:
-        # FITOUTOS / ANALYSIS LINE_LOWER RUNTIME FIX V1
         line_lower = str(line or "").lower()
 
-        line_hint = _line_contract_hint(line)
-
-        if current_contract_hint and line_hint == current_contract_hint:
-            active_other_contract_section = None
-        elif current_contract_hint and line_hint and line_hint != current_contract_hint:
-            active_other_contract_section = line_hint
-
-        reason = _other_contract_reason(line)
-
-        if active_other_contract_section and not _line_is_current_contract_override(line):
-            reason = reason or f"inside other-contract section: {active_other_contract_section}"
-
-        # FITOUTOS / STRONG BASEBUILD OWNERSHIP SKIP V1
-        # If the current job is Fitout/Craigs/4177, a line that explicitly says Basebuild/Bsebuild ownership must be skipped.
-        # Example: "done in Fitout ... but apart of Bsebuild" must not become a 4177 task code.
         target_is_fitout_contract = (
             target_job_number == "4177"
             or "fitout" in job_context_text
@@ -2880,8 +2867,25 @@ async def analyze_job_files(job_id: str, user: dict = Depends(require_roles(User
             "belongs to bsebuild"
         ]
 
-        if target_is_fitout_contract and any(term in line_lower for term in basebuild_ownership_terms):
+        has_single_line_basebuild_exception = (
+            target_is_fitout_contract
+            and any(term in line_lower for term in basebuild_ownership_terms)
+        )
+
+        line_hint = None if has_single_line_basebuild_exception else _line_contract_hint(line)
+
+        if current_contract_hint and line_hint == current_contract_hint:
+            active_other_contract_section = None
+        elif current_contract_hint and line_hint and line_hint != current_contract_hint:
+            active_other_contract_section = line_hint
+
+        reason = _other_contract_reason(line)
+
+        if has_single_line_basebuild_exception:
             reason = reason or "line explicitly says this item belongs to Basebuild/Bsebuild, not the Fitout contract"
+
+        if active_other_contract_section and not _line_is_current_contract_override(line):
+            reason = reason or f"inside other-contract section: {active_other_contract_section}"
 
         if reason:
             skipped_other_contract_content.append({
