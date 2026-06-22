@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 
 
@@ -848,11 +848,49 @@ try {
 
       const data = parseRes.data;
 
+      // FITOUTOS / PROGRAMME PARSE PAYLOAD SHAPE V1
+      // Backend parse-programme responses may expose rows as top-level
+      // data.items or nested parse_result.items. Normalise once so the
+      // review table, counts, warnings, and confirmation payload all use
+      // the same parsed programme rows.
+      const parsedProgrammeItems = Array.isArray(data.items)
+        ? data.items
+        : Array.isArray(data.parse_result?.items)
+          ? data.parse_result.items
+          : Array.isArray(data.parseResult?.items)
+            ? data.parseResult.items
+            : [];
+
+      const parsedWarnings = Array.isArray(data.warnings)
+        ? data.warnings
+        : Array.isArray(data.parse_result?.warnings)
+          ? data.parse_result.warnings
+          : Array.isArray(data.parseResult?.warnings)
+            ? data.parseResult.warnings
+            : [];
+
+      const parsedErrors = Array.isArray(data.errors)
+        ? data.errors
+        : Array.isArray(data.parse_result?.errors)
+          ? data.parse_result.errors
+          : Array.isArray(data.parseResult?.errors)
+            ? data.parseResult.errors
+            : [];
+
+      const parsedMetadata =
+        data.metadata ||
+        data.parse_result?.metadata ||
+        data.parseResult?.metadata ||
+        {};
+
+      const parsedItemCount = parsedProgrammeItems.length;
+      const parsedWarningCount = typeof data.warning_count === "number" ? data.warning_count : parsedWarnings.length;
 
 
-      if (!data.success || data.item_count === 0) {
 
-        toast.error(data.errors?.[0]?.message || 'No programme items found in file');
+      if (!data.success || parsedProgrammeItems.length === 0) {
+
+        toast.error(parsedErrors?.[0]?.message || data.errors?.[0]?.message || 'No programme items found in file');
 
         return;
 
@@ -866,11 +904,11 @@ try {
 
         filename: data.filename,
 
-        warnings: data.warnings || [],
+        warnings: parsedWarnings,
 
-        errors: data.errors || [],
+        errors: parsedErrors,
 
-        metadata: data.metadata || {},
+        metadata: parsedMetadata,
 
       });
 
@@ -878,7 +916,7 @@ try {
 
       // Set programme items from parsed data
 
-      setProgrammeItems(data.items || []);
+      setProgrammeItems(parsedProgrammeItems);
 
 
 
@@ -888,7 +926,7 @@ try {
 
         job_summary: `Parsed from ${data.filename}`,
 
-        proposed_programme: data.items,
+        proposed_programme: parsedProgrammeItems,
 
         scope_items: [],
 
@@ -906,11 +944,11 @@ try {
 
       if (data.warning_count > 0) {
 
-        toast.warning(`Parsed ${data.item_count} items with ${data.warning_count} warnings. Review below.`);
+        toast.warning(`Parsed ${parsedItemCount} items with ${parsedWarningCount} warnings. Review below.`);
 
       } else {
 
-        toast.success(`Successfully parsed ${data.item_count} programme items!`);
+        toast.success(`Successfully parsed ${parsedItemCount} programme items!`);
 
       }
 
