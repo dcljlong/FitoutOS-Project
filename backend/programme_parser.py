@@ -51,6 +51,10 @@ COLUMN_MAPPINGS = {
 # Date format patterns to try (in order)
 DATE_FORMATS = [
     "%Y-%m-%d",          # 2026-01-15
+    # FITOUTOS / PROJECT PLAN 365 DATE FORMATS V3
+    "%a %d/%m/%Y",        # Thu 15/01/2026
+    "%a %d/%m/%y",         # Thu 15/01/26
+    "%d/%m/%y",           # 15/01/26
     "%d/%m/%Y",          # 15/01/2026
     "%m/%d/%Y",          # 01/15/2026
     "%d-%m-%Y",          # 15-01-2026
@@ -150,6 +154,11 @@ def parse_date(value: Any) -> Optional[str]:
     if not value_str or value_str.lower() in ['', 'none', 'null', 'n/a', 'na', 'tbd']:
         return None
     
+    # FITOUTOS / PROJECT PLAN 365 DATE NORMALISE V3
+    # Project Plan 365 exports dates like "Thu 16/04/26".
+    value_str = re.sub(r"\s+00:00:00$", "", value_str).strip()
+    value_str = re.sub(r"\s+", " ", value_str).strip()
+    value_str = re.sub(r"^(mon|tue|wed|thu|fri|sat|sun)\s+", "", value_str, flags=re.IGNORECASE).strip()
     # Try each date format
     for fmt in DATE_FORMATS:
         try:
@@ -535,3 +544,4 @@ def parse_uploaded_file(filepath: str, filename: str) -> Dict[str, Any]:
         "warning_count": len(result.warnings),
         "error_count": len(result.errors),
     }
+
