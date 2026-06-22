@@ -283,6 +283,21 @@ export default function JobSetupPage() {
 const [jobTaskCodes, setJobTaskCodes] = useState([]);
 
   const [programmeItems, setProgrammeItems] = useState([]);
+  const [parsedProgrammeReviewItems, setParsedProgrammeReviewItems] = useState([]);
+
+  // FITOUTOS / PROGRAMME REVIEW STABLE ROW SOURCE V2
+  // Keep parsed programme rows available for the Review & Confirm table even
+  // if programmeItems is reset by analysis/load effects after parse.
+  const reviewProgrammeItems =
+    programmeItems?.length > 0
+      ? programmeItems
+      : parsedProgrammeReviewItems?.length > 0
+        ? parsedProgrammeReviewItems
+        : analysis?.proposed_programme?.length > 0
+          ? analysis.proposed_programme
+          : parseResult?.items?.length > 0
+            ? parseResult.items
+            : [];
 
   const updateProgrammeField = (index, field, value) => {
 
@@ -789,6 +804,7 @@ try {
       setAnalysis(savedAnalysis);
 
       setProgrammeItems(savedAnalysis?.proposed_programme || []);
+      setParsedProgrammeReviewItems(savedAnalysis?.proposed_programme || []);
 
 
 
@@ -903,6 +919,7 @@ try {
       setParseResult({
 
         filename: data.filename,
+        items: parsedProgrammeItems,
 
         warnings: parsedWarnings,
 
@@ -917,6 +934,7 @@ try {
       // Set programme items from parsed data
 
       setProgrammeItems(parsedProgrammeItems);
+      setParsedProgrammeReviewItems(parsedProgrammeItems);
 
 
 
@@ -1770,7 +1788,7 @@ try {
 
                 <p className="text-xs text-muted-foreground">Programme</p>
 
-                <p className="text-2xl font-semibold">{(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length || 0}</p>
+                <p className="text-2xl font-semibold">{reviewProgrammeItems.length || 0}</p>
 
               </CardContent>
 
@@ -2294,7 +2312,7 @@ try {
 
       <ScrollArea className="h-[450px]">
 
-        {(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).length > 0 ? (
+        {reviewProgrammeItems.length > 0 ? (
 
           <table className="w-full text-sm">
 
@@ -2330,7 +2348,7 @@ try {
 
             <tbody>
 
-            {(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).map((item, index) => {
+            {reviewProgrammeItems.map((item, index) => {
 
               // Determine if row has issues
 
@@ -2532,7 +2550,7 @@ try {
 
                     <option value="">None</option>
 
-                    {(programmeItems?.length > 0 ? programmeItems : (analysis?.proposed_programme || [])).slice(0, index).map((pred, predIdx) => (
+                    {reviewProgrammeItems.slice(0, index).map((pred, predIdx) => (
 
                       <option key={predIdx} value={pred.id || `prog-${String(predIdx + 1).padStart(3, '0')}`}>
 
