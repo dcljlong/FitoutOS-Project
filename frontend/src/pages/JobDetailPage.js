@@ -202,7 +202,6 @@ export default function JobDetailPage() {
         api.get(`/jobs/${jobId}/unmatched-labour`),
         api.post(`/jobs/${jobId}/analyze`),
       ]);
-      console.log('JOBDETAIL tasksRes.data =', tasksRes.data);
       setJob(jobRes.data);
       setTasks(Array.isArray(tasksRes.data) ? tasksRes.data : (tasksRes.data?.value || []));
       setTaskCodes(codesRes.data);
