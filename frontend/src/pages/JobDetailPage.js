@@ -236,6 +236,7 @@ export default function JobDetailPage() {
       : 0;
   const hasProgrammeTaskSync = programmeTaskDisplayCount > 0;
 
+  // FITOUTOS / JOB DETAIL MOJIBAKE CLEANUP V2
   // FITOUTOS / PROGRAMME TIMELINE ROW TYPE BADGES V2
   const getProgrammeTimelineRowTypeLabel = (item) => {
     const rowType = String(item?.row_type || "").toLowerCase();
@@ -2563,7 +2564,7 @@ const fetchTaskMaterials = async (taskId) => {
                 </div>
                 <SheetTitle className="text-xl">{selectedTask.task_name}</SheetTitle>
                 <SheetDescription>
-                  {selectedTask.task_type && `${selectedTask.task_type} Ã¢â‚¬Â¢ `}
+                  {selectedTask.task_type && `${selectedTask.task_type} - `}
                   {selectedTask.zone_area && `${selectedTask.zone_area}`}
                 </SheetDescription>
               </SheetHeader>
