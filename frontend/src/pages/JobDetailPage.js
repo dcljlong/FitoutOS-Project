@@ -226,8 +226,15 @@ export default function JobDetailPage() {
   }, [fetchJobData]);
 
   // FITOUTOS / PROGRAMME TASK SYNC BUTTON CLARITY V1
-  const generatedProgrammeTaskCount = tasks.filter((task) => task?.source_programme_id).length;
+  // FITOUTOS / PROGRAMME TASK SYNC DISPLAY FALLBACK V1
+  const linkedProgrammeTaskCount = tasks.filter((task) => task?.source_programme_id).length;
   const programmeRowCount = programme.length;
+  const programmeTaskDisplayCount = linkedProgrammeTaskCount > 0
+    ? linkedProgrammeTaskCount
+    : programmeRowCount > 0
+      ? tasks.length
+      : 0;
+  const hasProgrammeTaskSync = programmeTaskDisplayCount > 0;
 
   // FITOUTOS / PROGRAMME GENERATE TASKS FEEDBACK V3
   const handleGenerateTasksFromProgramme = async () => {
@@ -1571,13 +1578,13 @@ const fetchTaskMaterials = async (taskId) => {
                 <Sparkles className="mr-2 h-4 w-4" />
                 {generatingProgrammeTasks
                   ? 'Syncing Tasks...'
-                  : generatedProgrammeTaskCount > 0
+                  : hasProgrammeTaskSync
                     ? 'Re-sync Tasks from Programme'
                     : 'Generate Tasks from Programme'}
               </Button>
               <p className="text-xs text-muted-foreground text-right">
-                {generatedProgrammeTaskCount > 0
-                  ? `${generatedProgrammeTaskCount} generated tasks synced from ${programmeRowCount} programme rows`
+                {hasProgrammeTaskSync
+                  ? `${programmeTaskDisplayCount} tasks synced from ${programmeRowCount} programme rows`
                   : `${programmeRowCount} programme rows ready to generate tasks`}
               </p>
             </div>
