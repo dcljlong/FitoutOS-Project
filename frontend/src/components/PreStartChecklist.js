@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -39,19 +39,9 @@ export default function PreStartChecklist({
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Initialize checklist
-  useEffect(() => {
-    if (initialChecklist && initialChecklist.length > 0) {
-      setChecklist(initialChecklist);
-    } else if (taskId) {
-      fetchChecklist();
-    } else {
-      setChecklist(DEFAULT_CHECKLIST.map(item => ({ ...item })));
-    }
-  }, [taskId, initialChecklist]);
-
+  // FITOUTOS / REACT HOOK WARNING CLEANUP V2 - PRESTART
   // Fetch checklist from API
-  const fetchChecklist = async () => {
+  const fetchChecklist = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.get(`/tasks/${taskId}/checklist`);
@@ -62,7 +52,18 @@ export default function PreStartChecklist({
     } finally {
       setLoading(false);
     }
-  };
+  }, [taskId]);
+
+  // Initialize checklist
+  useEffect(() => {
+    if (initialChecklist && initialChecklist.length > 0) {
+      setChecklist(initialChecklist);
+    } else if (taskId) {
+      fetchChecklist();
+    } else {
+      setChecklist(DEFAULT_CHECKLIST.map(item => ({ ...item })));
+    }
+  }, [taskId, initialChecklist, fetchChecklist]);
 
   // Toggle item
   const toggleItem = (key) => {

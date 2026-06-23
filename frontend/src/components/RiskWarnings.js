@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,29 +25,8 @@ export default function RiskWarnings({
   const [riskData, setRiskData] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Fetch risk analysis from API if jobId provided
-  useEffect(() => {
-    if (jobId) {
-      fetchRiskAnalysis();
-    } else if (tasks.length > 0) {
-      analyzeTasksLocally();
-    }
-  }, [jobId, tasks]);
-
-  const fetchRiskAnalysis = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get(`/jobs/${jobId}/risk-analysis`);
-      setRiskData(response.data);
-    } catch (error) {
-      console.error('Failed to fetch risk analysis:', error);
-      analyzeTasksLocally();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const analyzeTasksLocally = () => {
+  // FITOUTOS / REACT HOOK WARNING CLEANUP V2 - RISK
+  const analyzeTasksLocally = useCallback(() => {
     const now = new Date();
     const blocked = [];
     const atRisk = [];
@@ -115,7 +94,29 @@ export default function RiskWarnings({
       at_risk_tasks: atRisk,
       checklist_incomplete: checklistIncomplete,
     });
-  };
+  }, [tasks]);
+
+  const fetchRiskAnalysis = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await api.get(`/jobs/${jobId}/risk-analysis`);
+      setRiskData(response.data);
+    } catch (error) {
+      console.error('Failed to fetch risk analysis:', error);
+      analyzeTasksLocally();
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId, analyzeTasksLocally]);
+
+  // Fetch risk analysis from API if jobId provided
+  useEffect(() => {
+    if (jobId) {
+      fetchRiskAnalysis();
+    } else if (tasks.length > 0) {
+      analyzeTasksLocally();
+    }
+  }, [jobId, tasks.length, fetchRiskAnalysis, analyzeTasksLocally]);
 
   if (loading) {
     return (

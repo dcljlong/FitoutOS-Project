@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { format, addDays, differenceInDays, startOfWeek, endOfWeek, isWeekend, parseISO, isSameDay } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -283,7 +283,8 @@ export default function GanttChart({
     });
   };
 
-  const handleMouseMove = (e) => {
+  // FITOUTOS / REACT HOOK WARNING CLEANUP V2 - GANTT
+  const handleMouseMove = useCallback((e) => {
     if (!dragging) return;
     
     const deltaX = e.clientX - dragging.startX;
@@ -299,11 +300,11 @@ export default function GanttChart({
         onTaskDurationChange(dragging.item.id, format(newEnd, 'yyyy-MM-dd'));
       }
     }
-  };
+  }, [dragging, colWidth, onTaskMove, onTaskDurationChange]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setDragging(null);
-  };
+  }, []);
 
   useEffect(() => {
     if (dragging) {
@@ -314,7 +315,7 @@ export default function GanttChart({
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [dragging]);
+  }, [dragging, handleMouseMove, handleMouseUp]);
 
   // Render dependency lines
   const renderDependencyLines = () => {
