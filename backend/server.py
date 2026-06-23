@@ -4604,6 +4604,36 @@ async def generate_tasks_from_programme(
         if t.get("source_programme_id")
     }
 
+
+    # FITOUTOS / PROGRAMME GENERATED TASK DEDUPE V2
+    # Keep one generated task per programme source row. This makes the
+    # generate action idempotent after repeated clicks or overlapping requests.
+    _generated_by_source = {}
+    deduped_generated_task_ids = []
+    for _generated_task in existing_generated_tasks:
+        _source_programme_id = _generated_task.get("source_programme_id")
+        if not _source_programme_id:
+            continue
+
+        if _source_programme_id not in _generated_by_source:
+            _generated_by_source[_source_programme_id] = _generated_task
+        else:
+            _duplicate_task_id = _generated_task.get("id")
+            if _duplicate_task_id:
+                deduped_generated_task_ids.append(_duplicate_task_id)
+
+    if deduped_generated_task_ids:
+        await db.tasks.delete_many({
+            "job_id": job_id,
+            "id": {"$in": deduped_generated_task_ids}
+        })
+        _deduped_id_set = set(deduped_generated_task_ids)
+        existing_generated_tasks = [
+            task for task in existing_generated_tasks
+            if task.get("id") not in _deduped_id_set
+        ]
+
+    existing_by_source = _generated_by_source
     job_task_codes = await db.job_task_codes.find(
         {"job_id": job_id, "is_active": True},
         {"_id": 0}
@@ -5014,7 +5044,8 @@ async def generate_tasks_from_programme(
         "created_count": len(created_tasks),
         "synced_count": synced_count,
         "skipped_non_task_count": skipped_non_task_rows,
-        "generated_without_task_code_count": generated_without_task_code
+        "generated_without_task_code_count": generated_without_task_code,
+        "deduped_generated_task_count": len(deduped_generated_task_ids)
     }
 
 

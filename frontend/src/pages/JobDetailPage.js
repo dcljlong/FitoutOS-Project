@@ -233,9 +233,12 @@ export default function JobDetailPage() {
       const createdCount = Number(response.data?.created_count || 0);
       const syncedCount = Number(response.data?.synced_count ?? createdCount);
       const noCodeCount = Number(response.data?.generated_without_task_code_count || 0);
+      const dedupedCount = Number(response.data?.deduped_generated_task_count || 0);
+
+      // FITOUTOS / PROGRAMME GENERATED TASK DEDUPE FEEDBACK V2
 
       if (syncedCount > 0) {
-        toast.success(`Generated/synced ${syncedCount} programme tasks${noCodeCount ? ` (${noCodeCount} without auto-linked task code)` : ''}`);
+        toast.success(`Generated/synced ${syncedCount} programme tasks${dedupedCount ? ` (${dedupedCount} duplicate generated tasks cleaned up)` : noCodeCount ? ` (${noCodeCount} without auto-linked task code)` : ''}`);
       } else {
         toast.error('No tasks were generated from the programme. Check programme row metadata and task-code mapping.');
       }
