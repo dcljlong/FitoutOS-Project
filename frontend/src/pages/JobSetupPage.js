@@ -2630,7 +2630,7 @@ try {
 
                     onChange={(e) => updateProgrammeField(index, "crew_size", parseFloat(e.target.value) || null)}
 
-                    placeholder="â€”"
+                    placeholder="-"
 
                     className="h-8 w-16"
 
