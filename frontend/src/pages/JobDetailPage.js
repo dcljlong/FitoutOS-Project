@@ -1689,10 +1689,9 @@ const fetchTaskMaterials = async (taskId) => {
                         )}
                       </div>
 
+                      {/* FITOUTOS / PROGRAMME DETAIL SEPARATOR CLEANUP V4 */}
                       <div className="text-sm text-muted-foreground mt-1">
-                        {item.phase && `${item.phase} â€¢ `}
-                        {item.trade && `${item.trade} â€¢ `}
-                        {item.duration && `${item.duration} ${item.duration_unit}`}
+                        {[item.phase, item.trade, item.duration ? `${item.duration} ${item.duration_unit}` : null].filter(Boolean).join(' - ')}
                       </div>
 
                       {item.depends_on?.length > 0 && (
