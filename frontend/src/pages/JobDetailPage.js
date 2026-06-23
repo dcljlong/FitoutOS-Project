@@ -236,6 +236,21 @@ export default function JobDetailPage() {
       : 0;
   const hasProgrammeTaskSync = programmeTaskDisplayCount > 0;
 
+  // FITOUTOS / PROGRAMME TIMELINE ROW TYPE BADGES V2
+  const getProgrammeTimelineRowTypeLabel = (item) => {
+    const rowType = String(item?.row_type || "").toLowerCase();
+    if (item?.is_milestone || rowType === "milestone") return "Milestone";
+    if (item?.generates_task === false || ["project_summary", "section", "summary"].includes(rowType)) return "Context";
+    return "Task";
+  };
+
+  const getProgrammeTimelineRowTypeClass = (item) => {
+    const label = getProgrammeTimelineRowTypeLabel(item);
+    if (label === "Milestone") return "border-purple-200 bg-purple-50 text-purple-700";
+    if (label === "Context") return "border-amber-200 bg-amber-50 text-amber-700";
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  };
+
   // FITOUTOS / PROGRAMME GENERATE TASKS FEEDBACK V3
   const handleGenerateTasksFromProgramme = async () => {
     setGeneratingProgrammeTasks(true);
@@ -1618,8 +1633,16 @@ const fetchTaskMaterials = async (taskId) => {
                       return (
                         <div key={`gantt-${item.id || index}`} className="space-y-1">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium truncate">
-                              {index + 1}. {item.name}
+                            <div className="min-w-0 flex items-center gap-2">
+                              <div className="text-sm font-medium truncate">
+                                {index + 1}. {item.name}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={`shrink-0 text-[10px] ${getProgrammeTimelineRowTypeClass(item)}`}
+                              >
+                                {getProgrammeTimelineRowTypeLabel(item)}
+                              </Badge>
                             </div>
                             <div className="text-xs text-muted-foreground whitespace-nowrap">
                               {duration} {item.duration_unit || 'days'}
