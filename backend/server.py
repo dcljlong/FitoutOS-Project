@@ -3440,6 +3440,26 @@ async def bulk_save_programme(job_id: str, data: ProgrammeBulkSave, user: dict =
             "source": item.get("source", "ai" if item.get("confidence") else "manual"),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        # FITOUTOS / PROGRAMME REVIEW METADATA PRESERVE V2
+        # Preserve parser audit/classification fields through confirm/bulk save
+        # so summary rows remain context-only and generated task creation is safe.
+        for _fitoutos_programme_meta_field in [
+            "row_type",
+            "generates_task",
+            "is_summary",
+            "is_milestone",
+            "source_row",
+            "source_sequence",
+            "source_predecessors",
+            "original_predecessor",
+            "predecessor_parse_source",
+            "invalid_predecessors",
+            "hours_quoted",
+            "crew_label",
+        ]:
+            if _fitoutos_programme_meta_field in item:
+                programme_item[_fitoutos_programme_meta_field] = item.get(_fitoutos_programme_meta_field)
+
         await db.job_programme.insert_one(programme_item)
         saved_items.append(programme_item)
 
@@ -3491,6 +3511,26 @@ async def confirm_parsed_programme(
             "source": "parsed_confirmed",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        # FITOUTOS / PROGRAMME REVIEW METADATA PRESERVE V2
+        # Preserve parser audit/classification fields through confirm/bulk save
+        # so summary rows remain context-only and generated task creation is safe.
+        for _fitoutos_programme_meta_field in [
+            "row_type",
+            "generates_task",
+            "is_summary",
+            "is_milestone",
+            "source_row",
+            "source_sequence",
+            "source_predecessors",
+            "original_predecessor",
+            "predecessor_parse_source",
+            "invalid_predecessors",
+            "hours_quoted",
+            "crew_label",
+        ]:
+            if _fitoutos_programme_meta_field in item:
+                programme_item[_fitoutos_programme_meta_field] = item.get(_fitoutos_programme_meta_field)
+
         await db.job_programme.insert_one(programme_item)
         saved_items.append(programme_item)
 
@@ -4608,6 +4648,12 @@ async def generate_tasks_from_programme(
     seen_programme_ids = set()
 
     for item in programme:
+        # FITOUTOS / PROGRAMME GENERATE TASKS SAFETY V2
+        # Only actionable programme task rows should generate FitoutOS tasks.
+        row_type = str(item.get("row_type") or "").strip().lower()
+        if item.get("generates_task") is False or row_type in {"project_summary", "section", "summary", "milestone"}:
+            continue
+
         if item.get("source_format") == "mpp" and (item.get("is_summary") or item.get("is_milestone")):
             continue
 

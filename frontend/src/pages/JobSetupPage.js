@@ -299,6 +299,18 @@ const [jobTaskCodes, setJobTaskCodes] = useState([]);
             ? parseResult.items
             : [];
 
+
+  // FITOUTOS / PROGRAMME REVIEW TASK CONTEXT COUNTS V2
+  // Show how many parsed rows are actionable task rows versus programme
+  // context rows before the user confirms the programme.
+  const isProgrammeGeneratedTaskRow = (item) => {
+    const rowType = String(item?.row_type || "").toLowerCase();
+    return item?.generates_task !== false && !["project_summary", "section", "summary", "milestone"].includes(rowType);
+  };
+
+  const programmeReviewTaskRows = reviewProgrammeItems.filter(isProgrammeGeneratedTaskRow);
+  const programmeReviewContextRows = reviewProgrammeItems.filter((item) => !isProgrammeGeneratedTaskRow(item));
+
   const updateProgrammeField = (index, field, value) => {
 
     const updated = [...programmeItems];
@@ -1789,6 +1801,11 @@ try {
                 <p className="text-xs text-muted-foreground">Programme</p>
 
                 <p className="text-2xl font-semibold">{reviewProgrammeItems.length || 0}</p>
+                {reviewProgrammeItems.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {programmeReviewTaskRows.length} task rows - {programmeReviewContextRows.length} context rows
+                  </p>
+                )}
 
               </CardContent>
 

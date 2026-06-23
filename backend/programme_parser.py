@@ -43,9 +43,12 @@ COLUMN_MAPPINGS = {
     # Phase variations
     "phase": ["phase", "section", "category", "stage", "group"],
     # Trade variations
-    "trade": ["trade", "responsible", "resource", "assigned", "owner"],
+    "trade": ["trade", "contractor", "responsible", "resource", "assigned", "owner"],
     # Notes variations
     "notes": ["notes", "note", "comments", "comment", "remarks"],
+    # Project Plan / commercial programme review extras
+    "hours_quoted": ["hrs quoted", "hours quoted", "quoted hours", "scope hours", "hrs"],
+    "crew_label": ["crew label", "crew", "crew size", "crew_label"],
 }
 
 # Date format patterns to try (in order)
@@ -207,32 +210,157 @@ def parse_duration(value: Any, start_date: Optional[str] = None, end_date: Optio
     return None
 
 
-def parse_predecessor(value: Any, valid_ids: set) -> Tuple[List[str], List[str]]:
+# FITOUTOS / PROJECT PLAN 365 ROW CLASSIFICATION V6
+# Project Plan 365 exports often omit the ID column but keep predecessor
+# references as source sequence numbers. Keep those rows reviewable, map
+# plain/comma/FS lag references back to generated programme IDs, and preserve
+# the source reference text for audit.
+def split_predecessor_tokens(value: Any) -> List[str]:
+    """Split predecessor text into Project Plan reference tokens without splitting lag text."""
+    if value is None or str(value).strip() == "":
+        return []
+
+    value_str = str(value).strip()
+    raw_tokens = re.split(r"[,;/]+", value_str)
+    return [token.strip() for token in raw_tokens if token and token.strip()]
+
+
+def normalise_project_predecessor_token(token: str) -> Optional[Dict[str, Any]]:
+    """Return Project Plan predecessor parts, e.g. 27FS+10 days -> source_id 27."""
+    if not token:
+        return None
+
+    token = str(token).strip()
+    match = re.match(
+        r"^\s*(?P<source_id>\d+)\s*(?P<link_type>FS|SS|FF|SF)?\s*(?P<lag>[+-]\s*\d+\s*(?:days?|day|d)?)?\s*$",
+        token,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    link_type = (match.group("link_type") or "FS").upper()
+    lag = match.group("lag")
+    if lag:
+        lag = re.sub(r"\s+", " ", lag.strip())
+
+    return {
+        "raw": token,
+        "source_id": match.group("source_id"),
+        "link_type": link_type,
+        "lag": lag,
+    }
+
+
+def parse_predecessor(value: Any, valid_ids: set, source_id_map: Optional[Dict[str, str]] = None) -> Tuple[List[str], List[str]]:
     """
-    Parse predecessor field which may contain comma-separated IDs.
+    Parse predecessor field. Supports direct IDs, comma lists, and Project Plan
+    references such as 12FS-1 days or 27FS+10 days.
     Returns (valid_predecessors, invalid_predecessors).
     """
-    if value is None or str(value).strip() == "":
+    tokens = split_predecessor_tokens(value)
+    if not tokens:
         return [], []
-    
-    value_str = str(value).strip()
-    
-    # Split by common delimiters
-    raw_preds = re.split(r'[,;/\s]+', value_str)
-    raw_preds = [p.strip() for p in raw_preds if p.strip()]
-    
+
+    source_id_map = source_id_map or {}
     valid = []
     invalid = []
-    
-    for pred in raw_preds:
-        if pred in valid_ids:
-            valid.append(pred)
+
+    for token in tokens:
+        parsed = normalise_project_predecessor_token(token)
+        if parsed:
+            source_id = parsed["source_id"]
+            mapped_id = source_id_map.get(source_id)
+            if mapped_id:
+                if mapped_id not in valid:
+                    valid.append(mapped_id)
+                continue
+
+            if source_id in valid_ids:
+                if source_id not in valid:
+                    valid.append(source_id)
+                continue
+
+        if token in valid_ids:
+            if token not in valid:
+                valid.append(token)
         else:
-            invalid.append(pred)
-    
+            invalid.append(token)
+
     return valid, invalid
 
 
+def _programme_is_empty_export_value(value: Any) -> bool:
+    return value is None or str(value).strip().lower() in {"", "none", "null", "n/a", "na", "tbd", "0"}
+
+
+def _programme_number_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+
+    value_str = str(value).strip().lower()
+    if value_str in {"", "none", "null", "n/a", "na", "tbd"}:
+        return None
+
+    value_str = value_str.replace(",", "")
+    value_str = re.sub(r"[^0-9.\-]", "", value_str)
+    if value_str in {"", "-", "."}:
+        return None
+
+    try:
+        return float(value_str)
+    except ValueError:
+        return None
+
+
+def classify_programme_row(
+    task_name: Any,
+    predecessor_value: Any,
+    contractor_value: Any,
+    duration_value: Any,
+    hours_quoted_value: Any,
+    crew_label_value: Any,
+    source_sequence: int,
+) -> Tuple[str, bool]:
+    """
+    Classify a Project Plan export row without relying on Excel outline/indent
+    metadata, because Project Plan 365 XLSX exports often flatten those values.
+    """
+    name = str(task_name or "").strip()
+    name_lower = name.lower()
+    pred_tokens = split_predecessor_tokens(predecessor_value)
+
+    duration = parse_duration(duration_value)
+    hours_quoted = _programme_number_value(hours_quoted_value)
+    crew_label = _programme_number_value(crew_label_value)
+
+    contractor_empty = _programme_is_empty_export_value(contractor_value)
+    has_work_signal = (
+        bool(pred_tokens)
+        or not contractor_empty
+        or (hours_quoted is not None and hours_quoted > 0)
+        or (crew_label is not None and crew_label > 0)
+    )
+
+    if source_sequence == 1:
+        return "project_summary", False
+
+    if re.fullmatch(r"level\s+\d+[a-z]?", name_lower, flags=re.IGNORECASE):
+        return "section", False
+
+    if name.isupper() and any(ch.isalpha() for ch in name) and not pred_tokens:
+        return "section", False
+
+    if duration is not None and duration <= 0:
+        return "milestone", False
+
+    if not pred_tokens and contractor_empty:
+        return "summary", False
+
+    if not has_work_signal and duration is not None and duration > 1:
+        return "summary", False
+
+    return "task", True
 def is_blank_row(row_values: List[Any]) -> bool:
     """Check if a row is effectively blank"""
     for val in row_values:
@@ -396,20 +524,37 @@ def parse_programme_file(filepath: str) -> ParseResult:
     # Track for duplicate detection
     seen_ids = set()
     valid_task_ids = set()
+    source_id_map = {}
+    source_sequence = 0
     current_phase = None
-    
-    # First pass: collect all task IDs for predecessor validation
+
+    # First pass: collect all task IDs for predecessor validation.
+    # Project Plan 365 can export predecessor numbers without exporting the ID
+    # column, so fall back to parsed source sequence -> generated prog ID.
     task_id_idx = col_mapping.get("task_id")
-    if task_id_idx is not None:
-        for row_idx, row in enumerate(rows[header_row_idx + 1:], start=header_row_idx + 2):
-            if row_idx <= header_row_idx or is_blank_row(row):
-                continue
-            if task_id_idx < len(row):
-                task_id = str(row[task_id_idx]).strip() if row[task_id_idx] else None
-                if task_id:
-                    valid_task_ids.add(task_id)
-    
+    for row_idx, row in enumerate(rows[header_row_idx + 1:], start=header_row_idx + 2):
+        if row_idx <= header_row_idx or is_blank_row(row):
+            continue
+        if is_section_header_row(row, col_mapping):
+            continue
+
+        source_sequence += 1
+
+        explicit_task_id = None
+        if task_id_idx is not None and task_id_idx < len(row):
+            explicit_task_id = str(row[task_id_idx]).strip() if row[task_id_idx] else None
+
+        generated_task_id = explicit_task_id or f"prog-{source_sequence:03d}"
+        valid_task_ids.add(generated_task_id)
+
+        if explicit_task_id:
+            valid_task_ids.add(explicit_task_id)
+            source_id_map[explicit_task_id] = generated_task_id
+
+        source_id_map[str(source_sequence)] = generated_task_id
+
     # Second pass: parse rows
+    source_sequence = 0
     for row_idx, row in enumerate(rows[header_row_idx + 1:], start=header_row_idx + 2):
         result.metadata["total_rows_read"] += 1
         
@@ -433,12 +578,15 @@ def parse_programme_file(filepath: str) -> ParseResult:
                 return row[idx]
             return None
         
+        source_sequence += 1
+
         # Task ID
         task_id = str(get_val("task_id") or "").strip()
         if not task_id:
-            # Generate an ID if missing
-            task_id = f"prog-{len(result.items) + 1:03d}"
-        
+            # Generate an ID if missing. Keep it aligned to source sequence
+            # so Project Plan predecessor references can be mapped reliably.
+            task_id = f"prog-{source_sequence:03d}"
+
         # Check for duplicates
         if task_id in seen_ids:
             result.metadata["duplicate_rows_found"] += 1
@@ -478,10 +626,20 @@ def parse_programme_file(filepath: str) -> ParseResult:
                 pass
         
         # Predecessors
-        valid_preds, invalid_preds = parse_predecessor(get_val("predecessor"), valid_task_ids)
+        predecessor_raw = get_val("predecessor")
+        valid_preds, invalid_preds = parse_predecessor(predecessor_raw, valid_task_ids, source_id_map)
+
+        # FITOUTOS / PROGRAMME SELF DEPENDENCY DROP V7
+        # Project Plan exports can contain predecessor references that resolve
+        # back to the same generated programme ID. Drop those links rather than
+        # creating circular/self dependencies in FitoutOS.
+        if task_id in valid_preds:
+            valid_preds = [pred for pred in valid_preds if pred != task_id]
+            result.add_warning(row_idx, f"Dropped self predecessor for {task_id}")
+
         if invalid_preds:
             result.add_warning(row_idx, f"Invalid predecessors for {task_id}: {', '.join(invalid_preds)}")
-        
+
         # Phase (from column or current section)
         phase = str(get_val("phase") or current_phase or "").strip() or "General"
         
@@ -490,7 +648,17 @@ def parse_programme_file(filepath: str) -> ParseResult:
         
         # Notes
         notes = str(get_val("notes") or "").strip()
-        
+
+        row_type, generates_task = classify_programme_row(
+            task_name,
+            predecessor_raw,
+            get_val("trade"),
+            get_val("duration"),
+            get_val("hours_quoted"),
+            get_val("crew_label"),
+            source_sequence,
+        )
+
         # Create the programme item
         item = {
             "id": task_id,
@@ -510,6 +678,16 @@ def parse_programme_file(filepath: str) -> ParseResult:
             "confidence": "parsed",
             "source": "file",
             "source_row": row_idx,
+            "source_sequence": source_sequence,
+            "row_type": row_type,
+            "generates_task": generates_task,
+            "is_summary": row_type in {"project_summary", "section", "summary"},
+            "is_milestone": row_type == "milestone",
+            "source_predecessors": split_predecessor_tokens(predecessor_raw),
+            "original_predecessor": str(predecessor_raw).strip() if predecessor_raw is not None else "",
+            "predecessor_parse_source": "source_sequence_fallback" if source_id_map else "task_id",
+            "hours_quoted": _programme_number_value(get_val("hours_quoted")),
+            "crew_label": get_val("crew_label"),
             "invalid_predecessors": invalid_preds,  # Track for UI warning
         }
         
