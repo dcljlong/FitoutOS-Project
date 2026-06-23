@@ -4647,11 +4647,17 @@ async def generate_tasks_from_programme(
     programme_id_to_task_id = {}
     seen_programme_ids = set()
 
+    # FITOUTOS / PROGRAMME GENERATE TASKS FALLBACK V3
+    # Track rows skipped/generated so the UI can show a useful result.
+    skipped_non_task_rows = 0
+    generated_without_task_code = 0
+
     for item in programme:
         # FITOUTOS / PROGRAMME GENERATE TASKS SAFETY V2
         # Only actionable programme task rows should generate FitoutOS tasks.
         row_type = str(item.get("row_type") or "").strip().lower()
         if item.get("generates_task") is False or row_type in {"project_summary", "section", "summary", "milestone"}:
+            skipped_non_task_rows += 1
             continue
 
         if item.get("source_format") == "mpp" and (item.get("is_summary") or item.get("is_milestone")):
@@ -4690,7 +4696,7 @@ async def generate_tasks_from_programme(
         ]
 
         if not auto_linked_code_ids:
-            continue
+            generated_without_task_code += 1
 
         task_data = {
             "job_id": job_id,
@@ -5002,9 +5008,13 @@ async def generate_tasks_from_programme(
             {"$set": {"is_critical": True}}
         )
 
+    synced_count = len(programme_id_to_task_id)
     return {
-        "message": "Tasks generated from programme",
-        "created_count": len(created_tasks)
+        "message": f"Generated/synced {synced_count} tasks from programme",
+        "created_count": len(created_tasks),
+        "synced_count": synced_count,
+        "skipped_non_task_count": skipped_non_task_rows,
+        "generated_without_task_code_count": generated_without_task_code
     }
 
 

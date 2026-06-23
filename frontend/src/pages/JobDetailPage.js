@@ -178,6 +178,7 @@ export default function JobDetailPage() {
   // Delay dialog state
   const [delayDialogOpen, setDelayDialogOpen] = useState(false);
   const [savingDelay, setSavingDelay] = useState(false);
+  const [generatingProgrammeTasks, setGeneratingProgrammeTasks] = useState(false);
   const [delayForm, setDelayForm] = useState({
     task_id: '',
     delay_type: 'main_contractor',
@@ -224,13 +225,31 @@ export default function JobDetailPage() {
     fetchJobData();
   }, [fetchJobData]);
 
+  // FITOUTOS / PROGRAMME GENERATE TASKS FEEDBACK V3
   const handleGenerateTasksFromProgramme = async () => {
+    setGeneratingProgrammeTasks(true);
     try {
       const response = await api.post(`/jobs/${jobId}/programme/generate-tasks`);
-      toast.success(response.data?.message || 'Tasks generated from programme');
-      fetchJobData();
+      const createdCount = Number(response.data?.created_count || 0);
+      const syncedCount = Number(response.data?.synced_count ?? createdCount);
+      const noCodeCount = Number(response.data?.generated_without_task_code_count || 0);
+
+      if (syncedCount > 0) {
+        toast.success(`Generated/synced ${syncedCount} programme tasks${noCodeCount ? ` (${noCodeCount} without auto-linked task code)` : ''}`);
+      } else {
+        toast.error('No tasks were generated from the programme. Check programme row metadata and task-code mapping.');
+      }
+
+      const [tasksRes, programmeRes] = await Promise.all([
+        api.get(`/tasks?job_id=${jobId}`),
+        api.get(`/jobs/${jobId}/programme`),
+      ]);
+      setTasks(Array.isArray(tasksRes.data) ? tasksRes.data : (tasksRes.data?.value || []));
+      setProgramme(programmeRes.data);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to generate tasks from programme');
+    } finally {
+      setGeneratingProgrammeTasks(false);
     }
   };
 
@@ -1541,9 +1560,9 @@ const fetchTaskMaterials = async (taskId) => {
 
           {canManage() && programme.length > 0 && (
             <div className="flex justify-end">
-              <Button onClick={handleGenerateTasksFromProgramme}>
+              <Button onClick={handleGenerateTasksFromProgramme} disabled={generatingProgrammeTasks}>
                 <Sparkles className="mr-2 h-4 w-4" />
-                Generate Tasks from Programme
+                {generatingProgrammeTasks ? 'Generating Tasks...' : 'Generate Tasks from Programme'}
               </Button>
             </div>
           )}
