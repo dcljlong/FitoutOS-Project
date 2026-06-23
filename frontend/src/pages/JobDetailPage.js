@@ -225,6 +225,10 @@ export default function JobDetailPage() {
     fetchJobData();
   }, [fetchJobData]);
 
+  // FITOUTOS / PROGRAMME TASK SYNC BUTTON CLARITY V1
+  const generatedProgrammeTaskCount = tasks.filter((task) => task?.source_programme_id).length;
+  const programmeRowCount = programme.length;
+
   // FITOUTOS / PROGRAMME GENERATE TASKS FEEDBACK V3
   const handleGenerateTasksFromProgramme = async () => {
     setGeneratingProgrammeTasks(true);
@@ -1562,11 +1566,20 @@ const fetchTaskMaterials = async (taskId) => {
           </Card>
 
           {canManage() && programme.length > 0 && (
-            <div className="flex justify-end">
+            <div className="flex flex-col items-end gap-2">
               <Button onClick={handleGenerateTasksFromProgramme} disabled={generatingProgrammeTasks}>
                 <Sparkles className="mr-2 h-4 w-4" />
-                {generatingProgrammeTasks ? 'Generating Tasks...' : 'Generate Tasks from Programme'}
+                {generatingProgrammeTasks
+                  ? 'Syncing Tasks...'
+                  : generatedProgrammeTaskCount > 0
+                    ? 'Re-sync Tasks from Programme'
+                    : 'Generate Tasks from Programme'}
               </Button>
+              <p className="text-xs text-muted-foreground text-right">
+                {generatedProgrammeTaskCount > 0
+                  ? `${generatedProgrammeTaskCount} generated tasks synced from ${programmeRowCount} programme rows`
+                  : `${programmeRowCount} programme rows ready to generate tasks`}
+              </p>
             </div>
           )}
           {programme.length > 0 && (
