@@ -2315,13 +2315,24 @@ try {
 
         </div>
 
-        <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
+        {/* FITOUTOS / PROGRAMME REVIEW DIRECT PARSE ACTION V1 */}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => handleParseProgramme()}
+            disabled={parsing || loading}
+          >
+            {parsing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Parse Programme File
+          </Button>
 
-          <Plus className="mr-2 h-4 w-4" />
-
-          Add Item
-
-        </Button>
+          <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Item
+          </Button>
+        </div>
 
       </div>
 
@@ -2662,21 +2673,29 @@ try {
         ) : (
 
           <div className="text-center py-8">
-
             <p className="text-muted-foreground mb-2">
-
               No programme generated
-
             </p>
+            <p className="text-xs text-muted-foreground mb-4">
+              Use the Project Plan parser to pull programme rows from the uploaded XLSX, CSV, or MPP file.
+            </p>
+            <div className="flex justify-center gap-2">
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={() => handleParseProgramme()}
+                disabled={parsing || loading}
+              >
+                {parsing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Parse Programme File
+              </Button>
 
-            <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
-
-              <Plus className="mr-2 h-4 w-4" />
-
-              Add First Item
-
-            </Button>
-
+              <Button type="button" variant="outline" size="sm" onClick={addProgrammeItem}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add First Item
+              </Button>
+            </div>
           </div>
 
         )}
@@ -2701,6 +2720,7 @@ try {
               onClick={() => {
                 setAnalysis(null);
                 setProgrammeItems([]);
+                setParsedProgrammeReviewItems([]);
                 setConfirmedData({ task_codes: [], tasks: [], scope_items: [] });
                 goToStep(1);
               }}
@@ -2715,6 +2735,7 @@ try {
               onClick={() => {
                 setAnalysis(null);
                 setProgrammeItems([]);
+                setParsedProgrammeReviewItems([]);
                 setConfirmedData({ task_codes: [], tasks: [], scope_items: [] });
                 goToStep(2);
               }}
