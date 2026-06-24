@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import ResourceAnalysisPage from '@/pages/ResourceAnalysisPage';
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -24,6 +24,63 @@ import ProgrammesPage from "@/pages/ProgrammesPage";
 
 // Layout
 import Layout from "@/components/Layout";
+
+// FITOUTOS / BRANDED ERROR BOUNDARY V1
+class FitoutErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  handleReload = () => {
+    window.location.reload();
+  };
+
+  handleDashboard = () => {
+    window.location.href = "/dashboard";
+  };
+
+  render() {
+    if (!this.state.hasError) {
+      return this.props.children;
+    }
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+        <div className="max-w-xl w-full rounded-2xl border border-amber-400/30 bg-slate-900/95 p-8 shadow-2xl">
+          <div className="text-xs uppercase tracking-[0.3em] text-amber-300 mb-3">Long Line FitoutOS</div>
+          <h1 className="text-2xl font-semibold mb-3">Something went wrong on this page.</h1>
+          <p className="text-slate-300 mb-6">
+            FitoutOS caught a page error before it could affect the rest of the app. Reload the page, or return to the dashboard and continue from there.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={this.handleReload}
+              className="rounded-lg bg-amber-400 px-4 py-2 font-semibold text-slate-950 hover:bg-amber-300"
+            >
+              Reload page
+            </button>
+            <button
+              type="button"
+              onClick={this.handleDashboard}
+              className="rounded-lg border border-slate-600 px-4 py-2 font-semibold text-slate-100 hover:bg-slate-800"
+            >
+              Go to dashboard
+            </button>
+          </div>
+          <p className="mt-5 text-xs text-slate-500">
+            If this keeps happening, use Feedback and include the page you were on.
+          </p>
+        </div>
+      </div>
+    );
+  }
+}
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -122,10 +179,12 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-          <Toaster position="top-right" richColors closeButton />
-        </BrowserRouter>
+        <FitoutErrorBoundary>
+          <BrowserRouter>
+            <AppRoutes />
+            <Toaster position="top-right" richColors closeButton />
+          </BrowserRouter>
+        </FitoutErrorBoundary>
       </AuthProvider>
     </ThemeProvider>
   );
