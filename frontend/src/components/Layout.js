@@ -44,19 +44,19 @@ const navItems = [
 
 const suiteLinks = [
   {
-    href: process.env.REACT_APP_LONG_LINE_DIARY_URL || 'http://localhost:3003/dashboard',
+    href: process.env.REACT_APP_LONG_LINE_DIARY_URL || 'https://lld-cody.vercel.app/dashboard',
     label: 'LLD',
     description: 'Long Line Diary / Site diary',
     icon: BookOpen,
   },
   {
-    href: process.env.REACT_APP_TOOL_TRACKER_URL || 'http://localhost:3002/dashboard',
+    href: process.env.REACT_APP_TOOL_TRACKER_URL || 'https://tool-tracker-enterprise.vercel.app/dashboard',
     label: 'Tool Tracker',
     description: 'Tool control',
     icon: Wrench,
   },
   {
-    href: process.env.REACT_APP_TIMESHEET_MANAGER_URL || 'http://localhost:3001/login',
+    href: process.env.REACT_APP_TIMESHEET_MANAGER_URL || 'https://timesheet-manager-two.vercel.app/login',
     label: 'Timesheet',
     description: 'Labour and payroll',
     icon: Clock3,
