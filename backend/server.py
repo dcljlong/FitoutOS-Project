@@ -52,6 +52,12 @@ app = FastAPI(title="FitoutOS API", version="1.0.0")
 @app.get("/")
 def root():
     return {"status": "FitoutOS backend running"}
+
+# FITOUTOS / ROOT HEALTH ROUTE V1
+@app.get("/health")
+async def root_health_check():
+    return {"status": "healthy", "service": "fitoutos"}
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
