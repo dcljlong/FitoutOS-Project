@@ -62,3 +62,14 @@ frontend/src/**/*backup*
 # Local credential/test artifacts
 memory/test_credentials.md
 test_credentials.md
+
+# LONG LINE SUITE / PUBLIC REPO BACKUP ARTIFACT IGNORE START
+backups/
+**/backups/
+*.bak
+*.bak_*
+*.before_*
+*.before*
+*.disable_secondary_loads.bak_*
+*.reenable_gates.bak_*
+# LONG LINE SUITE / PUBLIC REPO BACKUP ARTIFACT IGNORE END
