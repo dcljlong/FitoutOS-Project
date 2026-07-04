@@ -13,7 +13,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://fitout-stability.pre
 
 # Test credentials
 TEST_EMAIL = "admin@test.com"
-TEST_PASSWORD = "admin123"
+TEST_PASSWORD = os.environ.get("FITOUTOS_TEST_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")

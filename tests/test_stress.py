@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 FitoutOS Stress & Edge Case Tests
@@ -12,7 +13,7 @@ import time
 
 BASE_URL = "https://9c1fa4b6-ed08-4109-ba37-d518630c8ad8.preview.emergentagent.com/api"
 TEST_EMAIL = "admin@test.com"
-TEST_PASSWORD = "admin123"
+TEST_PASSWORD = os.environ.get("FITOUTOS_TEST_PASSWORD", "")
 
 test_results = {"passed": [], "failed": [], "warnings": []}
 
@@ -244,8 +245,8 @@ def test_special_characters(client: TestClient) -> bool:
         'Task with "double quotes"',
         "Task with <angle> brackets",
         "Task with & ampersand",
-        "Task with emoji 🏗️",
-        "Task with unicode: Ñoño Tëst",
+        "Task with emoji ðŸ—ï¸",
+        "Task with unicode: Ã‘oÃ±o TÃ«st",
         "Task\\nwith\\nnewlines",
     ]
     
@@ -328,22 +329,22 @@ def print_summary():
     print("STRESS TEST SUMMARY")
     print("="*60)
     
-    print(f"\n✅ PASSED: {len(test_results['passed'])}")
+    print(f"\nâœ… PASSED: {len(test_results['passed'])}")
     for item in test_results['passed']:
         print(f"   - {item}")
     
-    print(f"\n⚠️  WARNINGS: {len(test_results['warnings'])}")
+    print(f"\nâš ï¸  WARNINGS: {len(test_results['warnings'])}")
     for item in test_results['warnings']:
         print(f"   - {item}")
     
-    print(f"\n❌ FAILED: {len(test_results['failed'])}")
+    print(f"\nâŒ FAILED: {len(test_results['failed'])}")
     for item in test_results['failed']:
         print(f"   - {item}")
     
     total = len(test_results['passed']) + len(test_results['failed'])
     if total > 0:
         rate = len(test_results['passed']) / total * 100
-        print(f"\n📊 Success Rate: {rate:.1f}%")
+        print(f"\nðŸ“Š Success Rate: {rate:.1f}%")
 
 
 def main():
@@ -355,9 +356,9 @@ def main():
     
     print("\nAuthenticating...")
     if not client.login(TEST_EMAIL, TEST_PASSWORD):
-        print("❌ Login failed!")
+        print("âŒ Login failed!")
         return False
-    print("✅ Authenticated")
+    print("âœ… Authenticated")
     
     # Run all stress tests
     test_large_programme(client)

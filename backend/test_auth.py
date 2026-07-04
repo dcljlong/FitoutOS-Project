@@ -1,3 +1,4 @@
+import os
 import asyncio
 import server
 from pprint import pprint
@@ -7,7 +8,7 @@ async def run():
         server.UserCreate(
             name="DirectCheck3",
             email="directcheck3@test.com",
-            password="Admin123!",
+            password=os.environ.get("FITOUTOS_TEST_PASSWORD", ""),
             role="admin"
         )
     )

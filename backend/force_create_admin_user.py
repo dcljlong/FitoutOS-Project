@@ -15,7 +15,7 @@ db = client[os.environ["DB_NAME"]]
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 email = "admin@example.com"
-password = "admin123"
+password = os.environ.get("FITOUTOS_ADMIN_SEED_PASSWORD", "")
 
 hashed = pwd_context.hash(password)
 
