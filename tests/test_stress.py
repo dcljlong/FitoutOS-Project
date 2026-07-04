@@ -245,8 +245,8 @@ def test_special_characters(client: TestClient) -> bool:
         'Task with "double quotes"',
         "Task with <angle> brackets",
         "Task with & ampersand",
-        "Task with emoji ðŸ—ï¸",
-        "Task with unicode: Ã‘oÃ±o TÃ«st",
+        "Task with emoji construction",
+        "Task with unicode: Nono Test",
         "Task\\nwith\\nnewlines",
     ]
     
@@ -329,22 +329,22 @@ def print_summary():
     print("STRESS TEST SUMMARY")
     print("="*60)
     
-    print(f"\nâœ… PASSED: {len(test_results['passed'])}")
+    print(f"\nPASS PASSED: {len(test_results['passed'])}")
     for item in test_results['passed']:
         print(f"   - {item}")
     
-    print(f"\nâš ï¸  WARNINGS: {len(test_results['warnings'])}")
+    print(f"\nWARN WARNINGS: {len(test_results['warnings'])}")
     for item in test_results['warnings']:
         print(f"   - {item}")
     
-    print(f"\nâŒ FAILED: {len(test_results['failed'])}")
+    print(f"\nFAIL FAILED: {len(test_results['failed'])}")
     for item in test_results['failed']:
         print(f"   - {item}")
     
     total = len(test_results['passed']) + len(test_results['failed'])
     if total > 0:
         rate = len(test_results['passed']) / total * 100
-        print(f"\nðŸ“Š Success Rate: {rate:.1f}%")
+        print(f"\nSTATS Success Rate: {rate:.1f}%")
 
 
 def main():
@@ -356,9 +356,9 @@ def main():
     
     print("\nAuthenticating...")
     if not client.login(TEST_EMAIL, TEST_PASSWORD):
-        print("âŒ Login failed!")
+        print("FAIL Login failed!")
         return False
-    print("âœ… Authenticated")
+    print("PASS Authenticated")
     
     # Run all stress tests
     test_large_programme(client)

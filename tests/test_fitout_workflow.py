@@ -695,27 +695,27 @@ def print_test_summary():
     print("TEST SUMMARY")
     print("="*60)
     
-    print(f"\nâœ… PASSED: {len(test_results['passed'])}")
+    print(f"\nPASS PASSED: {len(test_results['passed'])}")
     for item in test_results['passed']:
         print(f"   - {item}")
     
-    print(f"\nâš ï¸  WARNINGS: {len(test_results['warnings'])}")
+    print(f"\nWARN WARNINGS: {len(test_results['warnings'])}")
     for item in test_results['warnings']:
         print(f"   - {item}")
     
-    print(f"\nâŒ FAILED: {len(test_results['failed'])}")
+    print(f"\nFAIL FAILED: {len(test_results['failed'])}")
     for item in test_results['failed']:
         print(f"   - {item}")
     
     if test_results['errors_fixed']:
-        print(f"\nðŸ”§ ERRORS FIXED: {len(test_results['errors_fixed'])}")
+        print(f"\nFIXED ERRORS FIXED: {len(test_results['errors_fixed'])}")
         for item in test_results['errors_fixed']:
             print(f"   - {item}")
     
     total = len(test_results['passed']) + len(test_results['failed'])
     if total > 0:
         success_rate = len(test_results['passed']) / total * 100
-        print(f"\nðŸ“Š Success Rate: {success_rate:.1f}%")
+        print(f"\nSTATS Success Rate: {success_rate:.1f}%")
     
     return len(test_results['failed']) == 0
 
@@ -734,9 +734,9 @@ def main():
     # Login
     print("\nAuthenticating...")
     if not client.login(TEST_EMAIL, TEST_PASSWORD):
-        print("âŒ Login failed! Aborting tests.")
+        print("FAIL Login failed! Aborting tests.")
         return False
-    print("âœ… Authenticated successfully")
+    print("PASS Authenticated successfully")
     
     # Run workflow tests for multiple jobs
     num_jobs = 3
