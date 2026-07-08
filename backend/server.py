@@ -5349,8 +5349,9 @@ async def import_labour(data: LabourImportRequest, user: dict = Depends(require_
         "issue_count": len(issues),
         "issues": issues
     }
+# FITOUTOS / IMPORTED LABOUR AUTH HARDENING V1
 @api_router.post("/jobs/{job_id}/auto-allocate-labour")
-async def auto_allocate_labour(job_id: str):
+async def auto_allocate_labour(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
     rows = await db.actual_labour.find(
         {"job_id": job_id, "task_id": None},
         {"_id": 0}
@@ -5529,8 +5530,9 @@ async def build_task_structure(
             "trace": traceback.format_exc()
         }
 
+# FITOUTOS / IMPORTED LABOUR AUTH HARDENING V1
 @api_router.get("/jobs/{job_id}/unmatched-labour")
-async def get_unmatched_labour(job_id: str):
+async def get_unmatched_labour(job_id: str, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
     rows = await db.actual_labour.find(
         {
             "job_id": job_id,
