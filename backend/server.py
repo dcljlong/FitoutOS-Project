@@ -5283,6 +5283,11 @@ async def import_labour(data: LabourImportRequest, user: dict = Depends(require_
     skipped_missing_job_number = 0
     issues = []
 
+    # FITOUTOS / TIMESHEET LABOUR IMPORT BATCH AUDIT V1
+    import_batch_id = str(uuid.uuid4())
+    import_started_at = datetime.now(timezone.utc).isoformat()
+    import_job_numbers = set()
+
     for row in data.rows:
         job_number = (row.job_number or "").strip()
         task_code_value = (row.task_code or "").strip()
@@ -5295,6 +5300,8 @@ async def import_labour(data: LabourImportRequest, user: dict = Depends(require_
                 "reason": "Missing job_number"
             })
             continue
+
+        import_job_numbers.add(job_number)
 
         job = await db.jobs.find_one({"job_number": job_number}, {"_id": 0})
         if not job:
@@ -5333,6 +5340,7 @@ async def import_labour(data: LabourImportRequest, user: dict = Depends(require_
             "trade": row.trade,
             "source": "timesheet_manager",
             "source_id": source_id_value,
+            "import_batch_id": import_batch_id,
             "imported_by": user.get("id"),
             "imported_by_email": user.get("email"),
             "created_at": datetime.now(timezone.utc).isoformat()
@@ -5341,13 +5349,37 @@ async def import_labour(data: LabourImportRequest, user: dict = Depends(require_
         await db.actual_labour.insert_one(labour_doc)
         inserted += 1
 
+    import_finished_at = datetime.now(timezone.utc).isoformat()
+    import_batch_summary = {
+        "id": import_batch_id,
+        "source": "timesheet_manager",
+        "job_numbers": sorted(list(import_job_numbers)),
+        "rows_received": len(data.rows),
+        "inserted": inserted,
+        "skipped_duplicates": skipped_duplicates,
+        "skipped_unknown_jobs": skipped_unknown_jobs,
+        "skipped_missing_job_number": skipped_missing_job_number,
+        "issue_count": len(issues),
+        "imported_by": user.get("id"),
+        "imported_by_email": user.get("email"),
+        "started_at": import_started_at,
+        "finished_at": import_finished_at
+    }
+
+    await db.labour_import_batches.insert_one({
+        **import_batch_summary,
+        "issues": issues,
+        "created_at": import_finished_at
+    })
+
     return {
         "inserted": inserted,
         "skipped_duplicates": skipped_duplicates,
         "skipped_unknown_jobs": skipped_unknown_jobs,
         "skipped_missing_job_number": skipped_missing_job_number,
         "issue_count": len(issues),
-        "issues": issues
+        "issues": issues,
+        "import_batch": import_batch_summary
     }
 # FITOUTOS / IMPORTED LABOUR AUTH HARDENING V1
 @api_router.post("/jobs/{job_id}/auto-allocate-labour")

@@ -486,6 +486,8 @@ export default function JobDetailPage() {
       const response = await api.post('/labour/import', { rows: parsedRows });
       const result = response.data || {};
 
+      const importBatch = result.import_batch || {};
+
       setTimesheetLabourImportResult({
         file: file.name,
         rowsParsed: parsedRows.length,
@@ -493,7 +495,11 @@ export default function JobDetailPage() {
         skippedDuplicates: result.skipped_duplicates || 0,
         skippedUnknownJobs: result.skipped_unknown_jobs || 0,
         skippedMissingJobNumber: result.skipped_missing_job_number || 0,
-        issueCount: result.issue_count || 0
+        issueCount: result.issue_count || 0,
+        importBatchId: importBatch.id || null,
+        importedByEmail: importBatch.imported_by_email || null,
+        finishedAt: importBatch.finished_at || null,
+        jobNumbers: importBatch.job_numbers || []
       });
 
       toast.success(`Imported ${result.inserted || 0} Timesheet labour row${(result.inserted || 0) === 1 ? '' : 's'}`);
@@ -1315,6 +1321,15 @@ const fetchTaskMaterials = async (taskId) => {
                   {timesheetLabourImportResult.skippedDuplicates ? `, duplicates skipped ${timesheetLabourImportResult.skippedDuplicates}` : ''}
                   {timesheetLabourImportResult.skippedUnknownJobs ? `, unknown jobs ${timesheetLabourImportResult.skippedUnknownJobs}` : ''}
                   {timesheetLabourImportResult.issueCount ? `, issues ${timesheetLabourImportResult.issueCount}` : ''}
+                  {timesheetLabourImportResult.importBatchId && (
+                    <div className="mt-1 text-[11px] text-muted-foreground" data-testid="timesheet-labour-import-batch-audit">
+                      {/* FITOUTOS / TIMESHEET LABOUR IMPORT BATCH AUDIT UI V1 */}
+                      Audit batch {timesheetLabourImportResult.importBatchId.slice(0, 8)}
+                      {timesheetLabourImportResult.importedByEmail ? ` by ${timesheetLabourImportResult.importedByEmail}` : ''}
+                      {timesheetLabourImportResult.finishedAt ? ` at ${new Date(timesheetLabourImportResult.finishedAt).toLocaleString()}` : ''}
+                      {timesheetLabourImportResult.jobNumbers?.length ? ` for job ${timesheetLabourImportResult.jobNumbers.join(', ')}` : ''}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
