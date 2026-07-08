@@ -108,6 +108,7 @@ export default function JobDetailPage() {
   const [delays, setDelays] = useState([]);
   const [programme, setProgramme] = useState([]);
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
+  const [allocatingLabour, setAllocatingLabour] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -281,6 +282,31 @@ export default function JobDetailPage() {
       setGeneratingProgrammeTasks(false);
     }
   };
+
+    // FITOUTOS / IMPORTED LABOUR AUTO ALLOCATE UI V1
+    const handleAutoAllocateLabour = async () => {
+      if (!jobId || allocatingLabour) return;
+
+      setAllocatingLabour(true);
+
+      try {
+        const response = await api.post(`/jobs/${jobId}/auto-allocate-labour`);
+        const matched = Number(response.data?.matched || 0);
+        const remaining = Number(response.data?.remaining_unmatched || 0);
+
+        if (matched > 0) {
+          toast.success(`Matched ${matched} imported labour row${matched === 1 ? '' : 's'} to FitoutOS task actuals${remaining ? ` (${remaining} still unmatched)` : ''}`);
+        } else {
+          toast.info('No imported labour rows matched. Check task-code mapping for this job.');
+        }
+
+        await fetchJobData();
+      } catch (error) {
+        toast.error(error.response?.data?.detail || 'Failed to auto-match imported labour');
+      } finally {
+        setAllocatingLabour(false);
+      }
+    };
 
     const handleUploadDocuments = async (event) => {
     const input = event.target;
@@ -1054,6 +1080,23 @@ const fetchTaskMaterials = async (taskId) => {
                 <p className="font-data text-xl font-bold text-amber-600">{unmatchedLabourHours.toFixed(2)}</p>
                 <p className="text-xs text-muted-foreground">Unmatched Hours</p>
               </div>
+            </div>
+
+            {/* FITOUTOS / IMPORTED LABOUR AUTO ALLOCATE UI V1 */}
+            <div className="mt-3 flex flex-col gap-2 rounded-lg border border-dashed p-3 md:flex-row md:items-center md:justify-between" data-testid="unmatched-labour-auto-allocate-panel">
+              <p className="text-xs text-muted-foreground">
+                 Match imported Timesheet Manager labour to the single FitoutOS task using the same task code. This updates task actual hours only inside FitoutOS.
+              </p>
+              <Button
+                 type="button"
+                 variant="outline"
+                 size="sm"
+                 onClick={handleAutoAllocateLabour}
+                 disabled={allocatingLabour || unmatchedLabourCount === 0}
+                 data-testid="auto-allocate-imported-labour-button"
+              >
+                 {allocatingLabour ? 'Matching...' : 'Auto-match imported labour'}
+              </Button>
             </div>
           </CardContent>
         </Card>
