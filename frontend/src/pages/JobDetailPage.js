@@ -109,6 +109,8 @@ export default function JobDetailPage() {
   const [programme, setProgramme] = useState([]);
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [allocatingLabour, setAllocatingLabour] = useState(false);
+  const [importingTimesheetLabour, setImportingTimesheetLabour] = useState(false);
+  const [timesheetLabourImportResult, setTimesheetLabourImportResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -308,7 +310,202 @@ export default function JobDetailPage() {
       }
     };
 
-    const handleUploadDocuments = async (event) => {
+  // FITOUTOS / TIMESHEET LABOUR CSV IMPORT UI V1
+  const parseTimesheetLabourCsv = (csvText) => {
+    const rows = [];
+    let current = '';
+    let row = [];
+    let inQuotes = false;
+
+    for (let i = 0; i < csvText.length; i += 1) {
+      const char = csvText[i];
+      const next = csvText[i + 1];
+
+      if (char === '"' && inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        row.push(current);
+        current = '';
+      } else if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') {
+          i += 1;
+        }
+        row.push(current);
+        if (row.some((cell) => String(cell || '').trim() !== '')) {
+          rows.push(row);
+        }
+        row = [];
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+
+    row.push(current);
+    if (row.some((cell) => String(cell || '').trim() !== '')) {
+      rows.push(row);
+    }
+
+    return rows;
+  };
+
+  const normaliseTimesheetLabourHeader = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  const pickTimesheetLabourValue = (row, headerMap, names) => {
+    for (const name of names) {
+      const key = normaliseTimesheetLabourHeader(name);
+      if (Object.prototype.hasOwnProperty.call(headerMap, key)) {
+        const value = row[headerMap[key]];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+          return String(value).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const parseTimesheetLabourHours = (value) => {
+    const cleaned = String(value || '').replace(/[^0-9.-]/g, '');
+    const parsed = parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const handleImportTimesheetLabourCsv = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+
+    if (!file) return;
+
+    if (!job?.job_number) {
+      toast.error('Job number is required before importing Timesheet labour.');
+      return;
+    }
+
+    setImportingTimesheetLabour(true);
+    setTimesheetLabourImportResult(null);
+
+    try {
+      const csvText = await file.text();
+      const table = parseTimesheetLabourCsv(csvText);
+
+      if (!table.length || table.length < 2) {
+        throw new Error('CSV has no data rows.');
+      }
+
+      const headers = table[0].map(normaliseTimesheetLabourHeader);
+      const headerMap = headers.reduce((acc, header, index) => {
+        if (header && !Object.prototype.hasOwnProperty.call(acc, header)) {
+          acc[header] = index;
+        }
+        return acc;
+      }, {});
+
+      const parsedRows = table.slice(1).map((row, index) => {
+        const csvJobNumber = pickTimesheetLabourValue(row, headerMap, [
+          'job_number',
+          'job number',
+          'job',
+          'job no',
+          'job #',
+          'project number'
+        ]);
+
+        const taskCode = pickTimesheetLabourValue(row, headerMap, [
+          'task_code',
+          'task code',
+          'code',
+          'programme task code',
+          'department quick code',
+          'smartly department quick code'
+        ]);
+
+        const date = pickTimesheetLabourValue(row, headerMap, [
+          'date',
+          'work date',
+          'timesheet date',
+          'day'
+        ]);
+
+        const hoursValue = pickTimesheetLabourValue(row, headerMap, [
+          'hours',
+          'total hours',
+          'actual hours',
+          'work hours',
+          'quantity'
+        ]);
+
+        const trade = pickTimesheetLabourValue(row, headerMap, [
+          'trade',
+          'type',
+          'work type',
+          'description'
+        ]);
+
+        const suppliedSourceId = pickTimesheetLabourValue(row, headerMap, [
+          'source_id',
+          'source id',
+          'id',
+          'timesheet id',
+          'row id'
+        ]);
+
+        const importJobNumber = csvJobNumber || job.job_number;
+        const hours = parseTimesheetLabourHours(hoursValue);
+        const safeDate = date || new Date().toISOString().slice(0, 10);
+        const source_id = suppliedSourceId || [
+          'fitoutos-ui',
+          file.name,
+          importJobNumber,
+          safeDate,
+          taskCode || 'no-code',
+          hours || '0',
+          index + 1
+        ].join('|');
+
+        return {
+          job_number: importJobNumber,
+          task_code: taskCode || null,
+          date: safeDate,
+          hours,
+          trade: trade || null,
+          source_id
+        };
+      }).filter((row) => row.job_number && row.hours > 0);
+
+      if (!parsedRows.length) {
+        throw new Error('No importable rows found. Check the CSV has hours and a job number or import from a FitoutOS job page.');
+      }
+
+      const response = await api.post('/labour/import', { rows: parsedRows });
+      const result = response.data || {};
+
+      setTimesheetLabourImportResult({
+        file: file.name,
+        rowsParsed: parsedRows.length,
+        inserted: result.inserted || 0,
+        skippedDuplicates: result.skipped_duplicates || 0,
+        skippedUnknownJobs: result.skipped_unknown_jobs || 0,
+        skippedMissingJobNumber: result.skipped_missing_job_number || 0,
+        issueCount: result.issue_count || 0
+      });
+
+      toast.success(`Imported ${result.inserted || 0} Timesheet labour row${(result.inserted || 0) === 1 ? '' : 's'}`);
+      await fetchJobData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || error.message || 'Failed to import Timesheet labour CSV');
+    } finally {
+      setImportingTimesheetLabour(false);
+    }
+  };
+
+  const handleUploadDocuments = async (event) => {
     const input = event.target;
     const files = Array.from(input.files || []);
     if (!files.length) return;
@@ -1101,6 +1298,44 @@ const fetchTaskMaterials = async (taskId) => {
           </CardContent>
         </Card>
       )}
+      {/* FITOUTOS / TIMESHEET LABOUR CSV IMPORT UI V1 */}
+      <Card data-testid="timesheet-labour-import-panel">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Import Timesheet Labour</CardTitle>
+          <CardDescription>Import approved Timesheet Manager CSV rows into FitoutOS actual labour, then auto-match by job task code.</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed p-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Use the Timesheet Manager export CSV for this job.</p>
+              <p className="text-xs">Required fields are job number, date, hours, and task code where available. If the CSV has no job number, this job number is used.</p>
+              {timesheetLabourImportResult && (
+                <div className="mt-2 text-xs" data-testid="timesheet-labour-import-result">
+                  Imported {timesheetLabourImportResult.inserted} / parsed {timesheetLabourImportResult.rowsParsed} rows from {timesheetLabourImportResult.file}
+                  {timesheetLabourImportResult.skippedDuplicates ? `, duplicates skipped ${timesheetLabourImportResult.skippedDuplicates}` : ''}
+                  {timesheetLabourImportResult.skippedUnknownJobs ? `, unknown jobs ${timesheetLabourImportResult.skippedUnknownJobs}` : ''}
+                  {timesheetLabourImportResult.issueCount ? `, issues ${timesheetLabourImportResult.issueCount}` : ''}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                <Upload className="mr-2 h-4 w-4" />
+                {importingTimesheetLabour ? 'Importing...' : 'Import Timesheet CSV'}
+                <Input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  disabled={importingTimesheetLabour}
+                  onChange={handleImportTimesheetLabourCsv}
+                  data-testid="timesheet-labour-csv-input"
+                />
+              </label>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Progress Overview</CardTitle>
