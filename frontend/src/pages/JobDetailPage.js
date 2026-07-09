@@ -1220,21 +1220,29 @@ const fetchTaskMaterials = async (taskId) => {
     })
     .slice(0, 120);
 
+  // FITOUTOS / UNMATCHED LABOUR MANUAL MATCH UNIQUE LABELS V1
   const getManualMatchTaskLabel = (task) => {
     const codeCount = Array.isArray(task.linked_task_codes) ? task.linked_task_codes.length : 0;
     const actualHours = parseFloat(task.actual_hours || 0);
     const plannedHours = parseFloat(task.quoted_hours || 0);
+    const shortId = String(task.id || '').slice(0, 8);
     const parts = [task.task_name || 'Unnamed task'];
 
-    if (codeCount > 0) {
-      parts.push(`${codeCount} code${codeCount === 1 ? '' : 's'}`);
+    if (task.planned_start || task.planned_finish) {
+      parts.push(`Dates ${task.planned_start || '?'} to ${task.planned_finish || '?'}`);
     }
+
+    parts.push(`${codeCount} code${codeCount === 1 ? '' : 's'}`);
 
     if (plannedHours > 0 || actualHours > 0) {
       parts.push(`Actual ${actualHours.toFixed(2)}h / Planned ${plannedHours.toFixed(2)}h`);
     }
 
-    return parts.join(' - ');
+    if (shortId) {
+      parts.push(`ID ${shortId}`);
+    }
+
+    return parts.join(' | ');
   };
 
   return (
