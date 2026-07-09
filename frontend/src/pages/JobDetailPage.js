@@ -109,6 +109,8 @@ export default function JobDetailPage() {
   const [programme, setProgramme] = useState([]);
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [allocatingLabour, setAllocatingLabour] = useState(false);
+  const [labourMatchTaskIds, setLabourMatchTaskIds] = useState({});
+  const [matchingLabourRowId, setMatchingLabourRowId] = useState(null);
   const [importingTimesheetLabour, setImportingTimesheetLabour] = useState(false);
   const [timesheetLabourImportResult, setTimesheetLabourImportResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -309,6 +311,43 @@ export default function JobDetailPage() {
         setAllocatingLabour(false);
       }
     };
+
+  // FITOUTOS / UNMATCHED LABOUR MANUAL MATCH UI V1
+  const handleMatchUnmatchedLabour = async (row) => {
+    const selectedTaskId = labourMatchTaskIds[row.id];
+
+    if (!row?.id) {
+      toast.error('Imported labour row is missing an ID.');
+      return;
+    }
+
+    if (!selectedTaskId) {
+      toast.error('Select a FitoutOS task before matching this labour row.');
+      return;
+    }
+
+    setMatchingLabourRowId(row.id);
+
+    try {
+      const response = await api.post(`/jobs/${jobId}/labour/${row.id}/match-task`, {
+        task_id: selectedTaskId
+      });
+
+      toast.success(`Matched ${Number(response.data?.hours || row.hours || 0).toFixed(2)}h to ${response.data?.task_name || 'selected task'}`);
+
+      setLabourMatchTaskIds((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+
+      await fetchJobData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to match imported labour row');
+    } finally {
+      setMatchingLabourRowId(null);
+    }
+  };
 
   // FITOUTOS / TIMESHEET LABOUR CSV IMPORT UI V1
   const parseTimesheetLabourCsv = (csvText) => {
@@ -1157,6 +1196,47 @@ const fetchTaskMaterials = async (taskId) => {
   const unmatchedLabourCount = unmatchedLabour.length;
   const unmatchedLabourHours = unmatchedLabour.reduce((sum, row) => sum + (parseFloat(row.hours) || 0), 0);
 
+  // FITOUTOS / UNMATCHED LABOUR MANUAL MATCH TASK SORT V1
+  const manualMatchTaskOptions = [...tasks]
+    .sort((a, b) => {
+      const aName = String(a.task_name || '').toLowerCase();
+      const bName = String(b.task_name || '').toLowerCase();
+      const aType = String(a.task_type || '').toLowerCase();
+      const bType = String(b.task_type || '').toLowerCase();
+
+      const aIsReviewTask = aType.includes('document') || aName.includes('review required');
+      const bIsReviewTask = bType.includes('document') || bName.includes('review required');
+      if (aIsReviewTask !== bIsReviewTask) return aIsReviewTask ? 1 : -1;
+
+      const aHasCodes = Array.isArray(a.linked_task_codes) && a.linked_task_codes.length > 0;
+      const bHasCodes = Array.isArray(b.linked_task_codes) && b.linked_task_codes.length > 0;
+      if (aHasCodes !== bHasCodes) return aHasCodes ? -1 : 1;
+
+      const aStart = a.planned_start || '';
+      const bStart = b.planned_start || '';
+      if (aStart !== bStart) return String(aStart).localeCompare(String(bStart));
+
+      return String(a.task_name || '').localeCompare(String(b.task_name || ''));
+    })
+    .slice(0, 120);
+
+  const getManualMatchTaskLabel = (task) => {
+    const codeCount = Array.isArray(task.linked_task_codes) ? task.linked_task_codes.length : 0;
+    const actualHours = parseFloat(task.actual_hours || 0);
+    const plannedHours = parseFloat(task.quoted_hours || 0);
+    const parts = [task.task_name || 'Unnamed task'];
+
+    if (codeCount > 0) {
+      parts.push(`${codeCount} code${codeCount === 1 ? '' : 's'}`);
+    }
+
+    if (plannedHours > 0 || actualHours > 0) {
+      parts.push(`Actual ${actualHours.toFixed(2)}h / Planned ${plannedHours.toFixed(2)}h`);
+    }
+
+    return parts.join(' - ');
+  };
+
   return (
     <div className="space-y-6" data-testid="job-detail-page">
       {/* Header */}
@@ -1308,6 +1388,7 @@ const fetchTaskMaterials = async (taskId) => {
                         <th className="px-3 py-2 text-left font-medium">Trade</th>
                         <th className="px-3 py-2 text-left font-medium">Batch</th>
                         <th className="px-3 py-2 text-left font-medium">Source</th>
+                        <th className="px-3 py-2 text-left font-medium">Match to task</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1319,6 +1400,35 @@ const fetchTaskMaterials = async (taskId) => {
                           <td className="px-3 py-2 whitespace-nowrap">{row.trade || 'Not set'}</td>
                           <td className="px-3 py-2 whitespace-nowrap">{row.import_batch_id ? row.import_batch_id.slice(0, 8) : 'No batch'}</td>
                           <td className="px-3 py-2 max-w-[260px] truncate" title={row.source_id || ''}>{row.source_id || 'No source id'}</td>
+                          <td className="px-3 py-2 min-w-[190px] max-w-[220px]">
+                            <div className="flex flex-col gap-2" data-testid="unmatched-labour-manual-match-control">
+                              <Select
+                                value={labourMatchTaskIds[row.id] || ''}
+                                onValueChange={(value) => setLabourMatchTaskIds((prev) => ({ ...prev, [row.id]: value }))}
+                              >
+                                <SelectTrigger className="h-8 w-full">
+                                  <SelectValue placeholder="Select matching task" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {manualMatchTaskOptions.map((task) => (
+                                    <SelectItem key={task.id} value={task.id}>
+                                      {getManualMatchTaskLabel(task)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={matchingLabourRowId === row.id || !labourMatchTaskIds[row.id]}
+                                onClick={() => handleMatchUnmatchedLabour(row)}
+                                data-testid="unmatched-labour-manual-match-button"
+                              >
+                                {matchingLabourRowId === row.id ? 'Matching...' : 'Match'}
+                              </Button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1340,6 +1450,33 @@ const fetchTaskMaterials = async (taskId) => {
                       </div>
                       <div className="mt-1 truncate text-muted-foreground" title={row.source_id || ''}>
                         Source: {row.source_id || 'No source id'}
+                      </div>
+                      <div className="mt-2 flex flex-col gap-2" data-testid="unmatched-labour-manual-match-mobile-control">
+                        <Select
+                          value={labourMatchTaskIds[row.id] || ''}
+                          onValueChange={(value) => setLabourMatchTaskIds((prev) => ({ ...prev, [row.id]: value }))}
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue placeholder="Select matching task" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {manualMatchTaskOptions.map((task) => (
+                              <SelectItem key={task.id} value={task.id}>
+                                {getManualMatchTaskLabel(task)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={matchingLabourRowId === row.id || !labourMatchTaskIds[row.id]}
+                          onClick={() => handleMatchUnmatchedLabour(row)}
+                          data-testid="unmatched-labour-manual-match-mobile-button"
+                        >
+                          {matchingLabourRowId === row.id ? 'Matching...' : 'Match to selected task'}
+                        </Button>
                       </div>
                     </div>
                   ))}

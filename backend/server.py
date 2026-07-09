@@ -5274,6 +5274,9 @@ class LabourImportRow(BaseModel):
 class LabourImportRequest(BaseModel):
     rows: List[LabourImportRow]
 
+class LabourMatchTaskRequest(BaseModel):
+    task_id: str
+
 
 @api_router.post("/labour/import")
 async def import_labour(data: LabourImportRequest, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
@@ -5440,6 +5443,89 @@ async def auto_allocate_labour(job_id: str, user: dict = Depends(require_roles(U
     return {
         "matched": matched,
         "remaining_unmatched": remaining_unmatched
+    }
+
+
+# FITOUTOS / UNMATCHED LABOUR MANUAL MATCH V1
+@api_router.post("/jobs/{job_id}/labour/{labour_id}/match-task")
+async def match_unmatched_labour_to_task(
+    job_id: str,
+    labour_id: str,
+    data: LabourMatchTaskRequest,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    labour_row = await db.actual_labour.find_one(
+        {"id": labour_id, "job_id": job_id},
+        {"_id": 0}
+    )
+    if not labour_row:
+        raise HTTPException(status_code=404, detail="Imported labour row not found")
+
+    if labour_row.get("task_id"):
+        raise HTTPException(status_code=400, detail="Imported labour row is already matched")
+
+    task = await db.tasks.find_one(
+        {"id": data.task_id, "job_id": job_id},
+        {"_id": 0}
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Matching task not found for this job")
+
+    labour_hours = float(labour_row.get("hours") or 0)
+    if labour_hours <= 0:
+        raise HTTPException(status_code=400, detail="Imported labour row has no positive hours to match")
+
+    matched_at = datetime.now(timezone.utc).isoformat()
+    current_actual = float(task.get("actual_hours") or 0)
+    new_actual = round(current_actual + labour_hours, 2)
+
+    await db.actual_labour.update_one(
+        {"id": labour_id, "job_id": job_id, "task_id": None},
+        {
+            "$set": {
+                "task_id": task["id"],
+                "matched_by": user.get("id"),
+                "matched_by_email": user.get("email"),
+                "matched_at": matched_at,
+                "match_method": "manual",
+                "matched_task_name": task.get("task_name")
+            }
+        }
+    )
+
+    await db.tasks.update_one(
+        {"id": task["id"], "job_id": job_id},
+        {"$set": {"actual_hours": new_actual}}
+    )
+
+    audit_record = {
+        "id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "labour_id": labour_id,
+        "task_id": task["id"],
+        "task_name": task.get("task_name"),
+        "hours": labour_hours,
+        "source": labour_row.get("source"),
+        "source_id": labour_row.get("source_id"),
+        "import_batch_id": labour_row.get("import_batch_id"),
+        "previous_task_id": None,
+        "match_method": "manual",
+        "matched_by": user.get("id"),
+        "matched_by_email": user.get("email"),
+        "matched_at": matched_at,
+        "created_at": matched_at
+    }
+    await db.labour_match_audit.insert_one(audit_record)
+
+    return {
+        "matched": True,
+        "labour_id": labour_id,
+        "task_id": task["id"],
+        "task_name": task.get("task_name"),
+        "hours": labour_hours,
+        "task_actual_hours": new_actual,
+        "matched_at": matched_at,
+        "matched_by_email": user.get("email")
     }
 
 # ===============================
