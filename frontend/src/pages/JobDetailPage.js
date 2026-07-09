@@ -110,6 +110,7 @@ export default function JobDetailPage() {
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [allocatingLabour, setAllocatingLabour] = useState(false);
   const [labourMatchTaskIds, setLabourMatchTaskIds] = useState({});
+  const [labourMatchTaskSearch, setLabourMatchTaskSearch] = useState({});
   const [matchingLabourRowId, setMatchingLabourRowId] = useState(null);
   const [importingTimesheetLabour, setImportingTimesheetLabour] = useState(false);
   const [timesheetLabourImportResult, setTimesheetLabourImportResult] = useState(null);
@@ -336,6 +337,12 @@ export default function JobDetailPage() {
       toast.success(`Matched ${Number(response.data?.hours || row.hours || 0).toFixed(2)}h to ${response.data?.task_name || 'selected task'}`);
 
       setLabourMatchTaskIds((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+
+      setLabourMatchTaskSearch((prev) => {
         const next = { ...prev };
         delete next[row.id];
         return next;
@@ -1245,6 +1252,25 @@ const fetchTaskMaterials = async (taskId) => {
     return parts.join(' | ');
   };
 
+  // FITOUTOS / UNMATCHED LABOUR MANUAL MATCH TASK SEARCH V1
+  const getFilteredManualMatchTaskOptions = (rowId) => {
+    const search = String(labourMatchTaskSearch[rowId] || '').trim().toLowerCase();
+
+    if (!search) {
+      return manualMatchTaskOptions.slice(0, 40);
+    }
+
+    return manualMatchTaskOptions
+      .filter((task) => {
+        const label = getManualMatchTaskLabel(task).toLowerCase();
+        const codeText = Array.isArray(task.linked_task_codes) ? task.linked_task_codes.join(' ').toLowerCase() : '';
+        const idText = String(task.id || '').toLowerCase();
+
+        return label.includes(search) || codeText.includes(search) || idText.includes(search);
+      })
+      .slice(0, 40);
+  };
+
   return (
     <div className="space-y-6" data-testid="job-detail-page">
       {/* Header */}
@@ -1410,6 +1436,14 @@ const fetchTaskMaterials = async (taskId) => {
                           <td className="px-3 py-2 max-w-[260px] truncate" title={row.source_id || ''}>{row.source_id || 'No source id'}</td>
                           <td className="px-3 py-2 min-w-[190px] max-w-[220px]">
                             <div className="flex flex-col gap-2" data-testid="unmatched-labour-manual-match-control">
+                              <input
+                                type="text"
+                                value={labourMatchTaskSearch[row.id] || ''}
+                                onChange={(event) => setLabourMatchTaskSearch((prev) => ({ ...prev, [row.id]: event.target.value }))}
+                                placeholder="Type to filter tasks, e.g. Grid"
+                                className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground"
+                                data-testid="unmatched-labour-manual-match-search"
+                              />
                               <Select
                                 value={labourMatchTaskIds[row.id] || ''}
                                 onValueChange={(value) => setLabourMatchTaskIds((prev) => ({ ...prev, [row.id]: value }))}
@@ -1418,11 +1452,15 @@ const fetchTaskMaterials = async (taskId) => {
                                   <SelectValue placeholder="Select matching task" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {manualMatchTaskOptions.map((task) => (
-                                    <SelectItem key={task.id} value={task.id}>
-                                      {getManualMatchTaskLabel(task)}
-                                    </SelectItem>
-                                  ))}
+                                  {getFilteredManualMatchTaskOptions(row.id).length > 0 ? (
+                                    getFilteredManualMatchTaskOptions(row.id).map((task) => (
+                                      <SelectItem key={task.id} value={task.id}>
+                                        {getManualMatchTaskLabel(task)}
+                                      </SelectItem>
+                                    ))
+                                  ) : (
+                                    <div className="px-2 py-2 text-xs text-muted-foreground">No task matches this search.</div>
+                                  )}
                                 </SelectContent>
                               </Select>
                               <Button
@@ -1460,6 +1498,14 @@ const fetchTaskMaterials = async (taskId) => {
                         Source: {row.source_id || 'No source id'}
                       </div>
                       <div className="mt-2 flex flex-col gap-2" data-testid="unmatched-labour-manual-match-mobile-control">
+                        <input
+                          type="text"
+                          value={labourMatchTaskSearch[row.id] || ''}
+                          onChange={(event) => setLabourMatchTaskSearch((prev) => ({ ...prev, [row.id]: event.target.value }))}
+                          placeholder="Type to filter tasks, e.g. Grid"
+                          className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground"
+                          data-testid="unmatched-labour-manual-match-mobile-search"
+                        />
                         <Select
                           value={labourMatchTaskIds[row.id] || ''}
                           onValueChange={(value) => setLabourMatchTaskIds((prev) => ({ ...prev, [row.id]: value }))}
@@ -1468,11 +1514,15 @@ const fetchTaskMaterials = async (taskId) => {
                             <SelectValue placeholder="Select matching task" />
                           </SelectTrigger>
                           <SelectContent>
-                            {manualMatchTaskOptions.map((task) => (
-                              <SelectItem key={task.id} value={task.id}>
-                                {getManualMatchTaskLabel(task)}
-                              </SelectItem>
-                            ))}
+                            {getFilteredManualMatchTaskOptions(row.id).length > 0 ? (
+                              getFilteredManualMatchTaskOptions(row.id).map((task) => (
+                                <SelectItem key={task.id} value={task.id}>
+                                  {getManualMatchTaskLabel(task)}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <div className="px-2 py-2 text-xs text-muted-foreground">No task matches this search.</div>
+                            )}
                           </SelectContent>
                         </Select>
                         <Button
