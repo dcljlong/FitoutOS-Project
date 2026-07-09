@@ -1285,6 +1285,68 @@ const fetchTaskMaterials = async (taskId) => {
               </div>
             </div>
 
+            {/* FITOUTOS / UNMATCHED LABOUR DETAIL TABLE V1 */}
+            {unmatchedLabour.length > 0 && (
+              <div className="mt-3 overflow-hidden rounded-lg border border-amber-500/20" data-testid="unmatched-labour-detail-table">
+                <div className="flex items-center justify-between gap-3 border-b border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium">Unmatched row details</p>
+                    <p className="text-xs text-muted-foreground">Rows imported from Timesheet Manager that still need a task-code match.</p>
+                  </div>
+                  {unmatchedLabour.length > 8 && (
+                    <p className="text-xs text-muted-foreground">Showing 8 of {unmatchedLabour.length}</p>
+                  )}
+                </div>
+
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/30 text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Date</th>
+                        <th className="px-3 py-2 text-right font-medium">Hours</th>
+                        <th className="px-3 py-2 text-left font-medium">Task code</th>
+                        <th className="px-3 py-2 text-left font-medium">Trade</th>
+                        <th className="px-3 py-2 text-left font-medium">Batch</th>
+                        <th className="px-3 py-2 text-left font-medium">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unmatchedLabour.slice(0, 8).map((row, index) => (
+                        <tr key={row.id || row.source_id || index} className="border-t border-border/60">
+                          <td className="px-3 py-2 whitespace-nowrap">{row.date || 'Not set'}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">{(parseFloat(row.hours) || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{row.task_code || 'No code'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{row.trade || 'Not set'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{row.import_batch_id ? row.import_batch_id.slice(0, 8) : 'No batch'}</td>
+                          <td className="px-3 py-2 max-w-[260px] truncate" title={row.source_id || ''}>{row.source_id || 'No source id'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid gap-2 p-3 md:hidden">
+                  {unmatchedLabour.slice(0, 8).map((row, index) => (
+                    <div key={row.id || row.source_id || index} className="rounded-md border border-border/60 p-2 text-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{row.date || 'Not set'}</span>
+                        <span className="font-data font-bold text-amber-600">{(parseFloat(row.hours) || 0).toFixed(2)}h</span>
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        Code: {row.task_code || 'No code'} - Trade: {row.trade || 'Not set'}
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        Batch: {row.import_batch_id ? row.import_batch_id.slice(0, 8) : 'No batch'}
+                      </div>
+                      <div className="mt-1 truncate text-muted-foreground" title={row.source_id || ''}>
+                        Source: {row.source_id || 'No source id'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* FITOUTOS / IMPORTED LABOUR AUTO ALLOCATE UI V1 */}
             <div className="mt-3 flex flex-col gap-2 rounded-lg border border-dashed p-3 md:flex-row md:items-center md:justify-between" data-testid="unmatched-labour-auto-allocate-panel">
               <p className="text-xs text-muted-foreground">
