@@ -5517,6 +5517,61 @@ async def match_unmatched_labour_to_task(
     }
     await db.labour_match_audit.insert_one(audit_record)
 
+    # FITOUTOS / LABOUR MATCH MAPPING SUGGESTION V1
+    # Manual matches are evidence for future automation, but they are not auto-applied here.
+    task_code_key = (labour_row.get("task_code") or "").strip().lower()
+    trade_key = (labour_row.get("trade") or "").strip().lower()
+    source_key = (labour_row.get("source") or "").strip().lower()
+
+    mapping_key_parts = [
+        job_id,
+        task_code_key or "no-task-code",
+        trade_key or "no-trade",
+        source_key or "no-source"
+    ]
+    mapping_key = "|".join(mapping_key_parts)
+
+    mapping_filter = {
+        "job_id": job_id,
+        "mapping_key": mapping_key
+    }
+
+    mapping_update = {
+        "$set": {
+            "job_id": job_id,
+            "mapping_key": mapping_key,
+            "task_code": labour_row.get("task_code"),
+            "trade": labour_row.get("trade"),
+            "source": labour_row.get("source"),
+            "suggested_task_id": task["id"],
+            "suggested_task_name": task.get("task_name"),
+            "suggestion_status": "suggested",
+            "last_labour_id": labour_id,
+            "last_source_id": labour_row.get("source_id"),
+            "last_import_batch_id": labour_row.get("import_batch_id"),
+            "last_matched_by": user.get("id"),
+            "last_matched_by_email": user.get("email"),
+            "last_matched_at": matched_at,
+            "updated_at": matched_at
+        },
+        "$setOnInsert": {
+            "id": str(uuid.uuid4()),
+            "created_at": matched_at,
+            "auto_apply_enabled": False,
+            "created_from": "manual_labour_match"
+        },
+        "$inc": {
+            "observed_match_count": 1,
+            "observed_hours": labour_hours
+        }
+    }
+
+    await db.labour_match_mapping_suggestions.update_one(
+        mapping_filter,
+        mapping_update,
+        upsert=True
+    )
+
     return {
         "matched": True,
         "labour_id": labour_id,
@@ -5525,7 +5580,8 @@ async def match_unmatched_labour_to_task(
         "hours": labour_hours,
         "task_actual_hours": new_actual,
         "matched_at": matched_at,
-        "matched_by_email": user.get("email")
+        "matched_by_email": user.get("email"),
+        "mapping_suggestion_recorded": True
     }
 
 # ===============================
