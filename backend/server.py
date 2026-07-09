@@ -5584,6 +5584,33 @@ async def match_unmatched_labour_to_task(
         "mapping_suggestion_recorded": True
     }
 
+
+# FITOUTOS / LABOUR MATCH MAPPING SUGGESTIONS REVIEW V1
+@api_router.get("/jobs/{job_id}/labour-match-mapping-suggestions")
+async def get_labour_match_mapping_suggestions(
+    job_id: str,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    suggestions = await db.labour_match_mapping_suggestions.find(
+        {"job_id": job_id},
+        {"_id": 0}
+    ).to_list(1000)
+
+    suggestions = sorted(
+        suggestions,
+        key=lambda row: (
+            str(row.get("suggestion_status") or ""),
+            -float(row.get("observed_hours") or 0),
+            str(row.get("suggested_task_name") or "")
+        )
+    )
+
+    return {
+        "job_id": job_id,
+        "count": len(suggestions),
+        "suggestions": suggestions
+    }
+
 # ===============================
 @api_router.post("/jobs/{job_id}/build-task-structure")
 async def build_task_structure(

@@ -114,6 +114,7 @@ export default function JobDetailPage() {
   const [matchingLabourRowId, setMatchingLabourRowId] = useState(null);
   const [importingTimesheetLabour, setImportingTimesheetLabour] = useState(false);
   const [timesheetLabourImportResult, setTimesheetLabourImportResult] = useState(null);
+  const [labourMatchMappingSuggestions, setLabourMatchMappingSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -197,7 +198,7 @@ export default function JobDetailPage() {
 
   const fetchJobData = useCallback(async () => {
     try {
-      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, documentsRes, unmatchedRes, analysisRes] = await Promise.all([
+      const [jobRes, tasksRes, codesRes, subsRes, delaysRes, programmeRes, documentsRes, unmatchedRes, mappingSuggestionsRes, analysisRes] = await Promise.all([
         api.get(`/jobs/${jobId}`),
         api.get(`/tasks?job_id=${jobId}`),
         api.get(`/jobs/${jobId}/task-codes`),
@@ -206,6 +207,7 @@ export default function JobDetailPage() {
         api.get(`/jobs/${jobId}/programme`),
         api.get(`/jobs/${jobId}/files`),
         api.get(`/jobs/${jobId}/unmatched-labour`),
+        api.get(`/jobs/${jobId}/labour-match-mapping-suggestions`).catch(() => ({ data: { suggestions: [] } })),
         api.post(`/jobs/${jobId}/analyze`),
       ]);
       setJob(jobRes.data);
@@ -217,6 +219,7 @@ export default function JobDetailPage() {
       setDocuments(Array.isArray(documentsRes.data) ? documentsRes.data : []);
       setAnalysis(analysisRes.data || jobRes.data?.latest_analysis || null);
       setUnmatchedLabour(unmatchedRes.data.rows || []);
+      setLabourMatchMappingSuggestions(mappingSuggestionsRes.data?.suggestions || []);
 
     } catch (error) {
       toast.error('Failed to load job details');
@@ -1562,6 +1565,61 @@ const fetchTaskMaterials = async (taskId) => {
         </Card>
       )}
       {/* FITOUTOS / TIMESHEET LABOUR CSV IMPORT UI V1 */}
+      {/* FITOUTOS / LABOUR MATCH MAPPING SUGGESTIONS REVIEW UI V1 */}
+      <Card data-testid="labour-match-mapping-suggestions-panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            Labour Mapping Suggestions
+            <Badge variant="secondary">{labourMatchMappingSuggestions.length}</Badge>
+          </CardTitle>
+          <CardDescription>
+            Suggestions learned from manual labour matches. Review-only for now; they do not auto-apply.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {labourMatchMappingSuggestions.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+              No labour mapping suggestions recorded yet. Manual matches will appear here as reusable mapping evidence.
+            </div>
+          ) : (
+            <div className="space-y-2" data-testid="labour-match-mapping-suggestions-list">
+              {labourMatchMappingSuggestions.slice(0, 12).map((suggestion) => (
+                <div
+                  key={suggestion.id || suggestion.mapping_key}
+                  className="rounded-lg border p-3 text-sm"
+                  data-testid="labour-match-mapping-suggestion-row"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="font-medium">
+                        {suggestion.suggested_task_name || 'No task name'}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[suggestion.task_code ? `Code: ${suggestion.task_code}` : 'No task code', suggestion.trade ? `Trade: ${suggestion.trade}` : 'No trade', suggestion.source ? `Source: ${suggestion.source}` : 'No source'].join(' | ')}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Mapping key: {suggestion.mapping_key || 'Not set'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline">
+                        {Number(suggestion.observed_match_count || 0)} match{Number(suggestion.observed_match_count || 0) === 1 ? '' : 'es'}
+                      </Badge>
+                      <Badge variant="outline">
+                        {Number(suggestion.observed_hours || 0).toFixed(2)}h
+                      </Badge>
+                      <Badge variant={suggestion.auto_apply_enabled ? 'default' : 'secondary'}>
+                        {suggestion.auto_apply_enabled ? 'Auto apply on' : 'Review only'}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card data-testid="timesheet-labour-import-panel">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Import Timesheet Labour</CardTitle>
