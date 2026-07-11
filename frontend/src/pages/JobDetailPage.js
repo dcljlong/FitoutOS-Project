@@ -115,6 +115,7 @@ export default function JobDetailPage() {
   const [importingTimesheetLabour, setImportingTimesheetLabour] = useState(false);
   const [timesheetLabourImportResult, setTimesheetLabourImportResult] = useState(null);
   const [labourMatchMappingSuggestions, setLabourMatchMappingSuggestions] = useState([]);
+  const [reviewingLabourMappingId, setReviewingLabourMappingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -288,6 +289,29 @@ export default function JobDetailPage() {
       toast.error(error.response?.data?.detail || 'Failed to generate tasks from programme');
     } finally {
       setGeneratingProgrammeTasks(false);
+    }
+  };
+
+  // FITOUTOS / LABOUR MATCH MAPPING APPROVAL UI V1
+  const handleReviewLabourMappingSuggestion = async (suggestion, action) => {
+    if (!suggestion?.id) {
+      toast.error('Mapping suggestion is missing an ID.');
+      return;
+    }
+
+    setReviewingLabourMappingId(`${suggestion.id}:${action}`);
+
+    try {
+      await api.post(`/jobs/${jobId}/labour-match-mapping-suggestions/${suggestion.id}/review`, {
+        action
+      });
+
+      toast.success(action === 'approve' ? 'Labour mapping approved for future automation review.' : 'Labour mapping rejected.');
+      await fetchJobData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to review labour mapping suggestion');
+    } finally {
+      setReviewingLabourMappingId(null);
     }
   };
 
@@ -1611,6 +1635,26 @@ const fetchTaskMaterials = async (taskId) => {
                       <Badge variant={suggestion.auto_apply_enabled ? 'default' : 'secondary'}>
                         {suggestion.auto_apply_enabled ? 'Auto apply on' : 'Review only'}
                       </Badge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!suggestion.id || reviewingLabourMappingId === `${suggestion.id}:approve` || suggestion.suggestion_status === 'approved'}
+                        onClick={() => handleReviewLabourMappingSuggestion(suggestion, 'approve')}
+                        data-testid="labour-match-mapping-approve-button"
+                      >
+                        {reviewingLabourMappingId === `${suggestion.id}:approve` ? 'Approving...' : 'Approve'}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={!suggestion.id || reviewingLabourMappingId === `${suggestion.id}:reject` || suggestion.suggestion_status === 'rejected'}
+                        onClick={() => handleReviewLabourMappingSuggestion(suggestion, 'reject')}
+                        data-testid="labour-match-mapping-reject-button"
+                      >
+                        {reviewingLabourMappingId === `${suggestion.id}:reject` ? 'Rejecting...' : 'Reject'}
+                      </Button>
                     </div>
                   </div>
                 </div>

@@ -5278,6 +5278,10 @@ class LabourMatchTaskRequest(BaseModel):
     task_id: str
 
 
+class LabourMappingSuggestionReviewRequest(BaseModel):
+    action: str
+
+
 @api_router.post("/labour/import")
 async def import_labour(data: LabourImportRequest, user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))):
     inserted = 0
@@ -5609,6 +5613,70 @@ async def get_labour_match_mapping_suggestions(
         "job_id": job_id,
         "count": len(suggestions),
         "suggestions": suggestions
+    }
+
+
+# FITOUTOS / LABOUR MATCH MAPPING APPROVAL V1
+@api_router.post("/jobs/{job_id}/labour-match-mapping-suggestions/{suggestion_id}/review")
+async def review_labour_match_mapping_suggestion(
+    job_id: str,
+    suggestion_id: str,
+    data: LabourMappingSuggestionReviewRequest,
+    user: dict = Depends(require_roles(UserRole.ADMIN, UserRole.PM))
+):
+    action = (data.action or "").strip().lower()
+    if action not in ["approve", "reject"]:
+        raise HTTPException(status_code=400, detail="Action must be approve or reject")
+
+    suggestion = await db.labour_match_mapping_suggestions.find_one(
+        {"job_id": job_id, "id": suggestion_id},
+        {"_id": 0}
+    )
+    if not suggestion:
+        raise HTTPException(status_code=404, detail="Labour mapping suggestion not found")
+
+    reviewed_at = datetime.now(timezone.utc).isoformat()
+    is_approved = action == "approve"
+    next_status = "approved" if is_approved else "rejected"
+
+    update_data = {
+        "suggestion_status": next_status,
+        "auto_apply_enabled": is_approved,
+        "reviewed_by": user.get("id"),
+        "reviewed_by_email": user.get("email"),
+        "reviewed_at": reviewed_at,
+        "updated_at": reviewed_at
+    }
+
+    await db.labour_match_mapping_suggestions.update_one(
+        {"job_id": job_id, "id": suggestion_id},
+        {"$set": update_data}
+    )
+
+    updated = await db.labour_match_mapping_suggestions.find_one(
+        {"job_id": job_id, "id": suggestion_id},
+        {"_id": 0}
+    )
+
+    audit_record = {
+        "id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "suggestion_id": suggestion_id,
+        "mapping_key": suggestion.get("mapping_key"),
+        "action": action,
+        "suggestion_status": next_status,
+        "auto_apply_enabled": is_approved,
+        "reviewed_by": user.get("id"),
+        "reviewed_by_email": user.get("email"),
+        "reviewed_at": reviewed_at,
+        "created_at": reviewed_at
+    }
+    await db.labour_match_mapping_review_audit.insert_one(audit_record)
+
+    return {
+        "reviewed": True,
+        "action": action,
+        "suggestion": updated
     }
 
 # ===============================
