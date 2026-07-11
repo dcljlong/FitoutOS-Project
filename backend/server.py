@@ -5397,48 +5397,133 @@ async def auto_allocate_labour(job_id: str, user: dict = Depends(require_roles(U
     ).to_list(1000)
 
     matched = 0
+    matched_by_task_code = 0
+    matched_by_approved_mapping = 0
     unmatched = 0
 
+    # FITOUTOS / APPROVED LABOUR MAPPING AUTO APPLY V1
+    # Approved mappings are only applied when the PM/Admin explicitly runs Auto-match.
+    # Raw imports still create unmatched rows first; this avoids blind import-time allocation.
+    def build_labour_mapping_key(labour_row):
+        task_code_key = (labour_row.get("task_code") or "").strip().lower()
+        trade_key = (labour_row.get("trade") or "").strip().lower()
+        source_key = (labour_row.get("source") or "").strip().lower()
+
+        return "|".join([
+            job_id,
+            task_code_key or "no-task-code",
+            trade_key or "no-trade",
+            source_key or "no-source"
+        ])
+
     for row in rows:
+        task = None
+        task_id = None
+        match_method = None
+        matched_mapping_id = None
+
         task_code_value = (row.get("task_code") or "").strip()
-        if not task_code_value:
+
+        if task_code_value:
+            job_code = await db.job_task_codes.find_one(
+                {"job_id": job_id, "code": task_code_value},
+                {"_id": 0}
+            )
+
+            if job_code:
+                matching_tasks = await db.tasks.find(
+                    {"job_id": job_id, "linked_task_codes": job_code["id"]},
+                    {"_id": 0}
+                ).to_list(10)
+
+                if len(matching_tasks) == 1:
+                    task = matching_tasks[0]
+                    task_id = task["id"]
+                    match_method = "task_code"
+
+        if not task_id:
+            mapping_key = build_labour_mapping_key(row)
+            approved_mapping = await db.labour_match_mapping_suggestions.find_one(
+                {
+                    "job_id": job_id,
+                    "mapping_key": mapping_key,
+                    "suggestion_status": "approved",
+                    "auto_apply_enabled": True
+                },
+                {"_id": 0}
+            )
+
+            if approved_mapping and approved_mapping.get("suggested_task_id"):
+                mapped_task = await db.tasks.find_one(
+                    {"id": approved_mapping.get("suggested_task_id"), "job_id": job_id},
+                    {"_id": 0}
+                )
+
+                if mapped_task:
+                    task = mapped_task
+                    task_id = mapped_task["id"]
+                    match_method = "approved_mapping"
+                    matched_mapping_id = approved_mapping.get("id")
+
+        if not task_id:
             unmatched += 1
             continue
 
-        job_code = await db.job_task_codes.find_one(
-            {"job_id": job_id, "code": task_code_value},
-            {"_id": 0}
-        )
-
-        if not job_code:
-            continue
-
-        matching_tasks = await db.tasks.find(
-            {"job_id": job_id, "linked_task_codes": job_code["id"]},
-            {"_id": 0}
-        ).to_list(10)
-
-        if len(matching_tasks) != 1:
-            unmatched += 1
-            continue
-
-        task = matching_tasks[0]
-        task_id = task["id"]
+        labour_hours = float(row.get("hours") or 0)
+        matched_at = datetime.now(timezone.utc).isoformat()
 
         await db.actual_labour.update_one(
-            {"id": row["id"]},
-            {"$set": {"task_id": task_id}}
+            {"id": row["id"], "job_id": job_id, "task_id": None},
+            {
+                "$set": {
+                    "task_id": task_id,
+                    "matched_by": user.get("id"),
+                    "matched_by_email": user.get("email"),
+                    "matched_at": matched_at,
+                    "match_method": match_method,
+                    "matched_task_name": task.get("task_name"),
+                    "matched_mapping_id": matched_mapping_id
+                }
+            }
         )
 
-        current = task.get("actual_hours") or 0
-        new_total = float(current) + float(row.get("hours") or 0)
+        current_task = await db.tasks.find_one(
+            {"id": task_id, "job_id": job_id},
+            {"_id": 0}
+        )
+        current = float((current_task or {}).get("actual_hours") or 0)
+        new_total = round(current + labour_hours, 2)
 
         await db.tasks.update_one(
-            {"id": task_id},
-            {"$set": {"actual_hours": round(new_total, 2)}}
+            {"id": task_id, "job_id": job_id},
+            {"$set": {"actual_hours": new_total}}
         )
 
+        audit_record = {
+            "id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "labour_id": row.get("id"),
+            "task_id": task_id,
+            "task_name": task.get("task_name"),
+            "hours": labour_hours,
+            "source": row.get("source"),
+            "source_id": row.get("source_id"),
+            "import_batch_id": row.get("import_batch_id"),
+            "previous_task_id": None,
+            "match_method": match_method,
+            "matched_mapping_id": matched_mapping_id,
+            "matched_by": user.get("id"),
+            "matched_by_email": user.get("email"),
+            "matched_at": matched_at,
+            "created_at": matched_at
+        }
+        await db.labour_match_audit.insert_one(audit_record)
+
         matched += 1
+        if match_method == "approved_mapping":
+            matched_by_approved_mapping += 1
+        else:
+            matched_by_task_code += 1
 
     remaining_unmatched = await db.actual_labour.count_documents(
         {"job_id": job_id, "task_id": None}
@@ -5446,6 +5531,9 @@ async def auto_allocate_labour(job_id: str, user: dict = Depends(require_roles(U
 
     return {
         "matched": matched,
+        "matched_by_task_code": matched_by_task_code,
+        "matched_by_approved_mapping": matched_by_approved_mapping,
+        "unmatched_checked": unmatched,
         "remaining_unmatched": remaining_unmatched
     }
 
