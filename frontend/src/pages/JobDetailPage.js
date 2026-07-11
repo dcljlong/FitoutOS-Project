@@ -109,6 +109,7 @@ export default function JobDetailPage() {
   const [programme, setProgramme] = useState([]);
   const [unmatchedLabour, setUnmatchedLabour] = useState([]);
   const [allocatingLabour, setAllocatingLabour] = useState(false);
+  const [autoAllocateLabourResult, setAutoAllocateLabourResult] = useState(null);
   const [labourMatchTaskIds, setLabourMatchTaskIds] = useState({});
   const [labourMatchTaskSearch, setLabourMatchTaskSearch] = useState({});
   const [matchingLabourRowId, setMatchingLabourRowId] = useState(null);
@@ -234,6 +235,10 @@ export default function JobDetailPage() {
     fetchJobData();
   }, [fetchJobData]);
 
+  useEffect(() => {
+    setAutoAllocateLabourResult(null);
+  }, [jobId]);
+
   // FITOUTOS / PROGRAMME TASK SYNC BUTTON CLARITY V1
   // FITOUTOS / PROGRAMME TASK SYNC DISPLAY FALLBACK V1
   const linkedProgrammeTaskCount = tasks.filter((task) => task?.source_programme_id).length;
@@ -320,16 +325,28 @@ export default function JobDetailPage() {
       if (!jobId || allocatingLabour) return;
 
       setAllocatingLabour(true);
+      setAutoAllocateLabourResult(null);
 
       try {
         const response = await api.post(`/jobs/${jobId}/auto-allocate-labour`);
         const matched = Number(response.data?.matched || 0);
+        const matchedByTaskCode = Number(response.data?.matched_by_task_code || 0);
+        const matchedByApprovedMapping = Number(response.data?.matched_by_approved_mapping || 0);
+        const unmatchedChecked = Number(response.data?.unmatched_checked || 0);
         const remaining = Number(response.data?.remaining_unmatched || 0);
+
+        setAutoAllocateLabourResult({
+          matched,
+          matchedByTaskCode,
+          matchedByApprovedMapping,
+          unmatchedChecked,
+          remaining
+        });
 
         if (matched > 0) {
           toast.success(`Matched ${matched} imported labour row${matched === 1 ? '' : 's'} to FitoutOS task actuals${remaining ? ` (${remaining} still unmatched)` : ''}`);
         } else {
-          toast.info('No imported labour rows matched. Check task-code mapping for this job.');
+          toast.info('No imported labour rows matched. Check task codes or approved labour mappings for this job.');
         }
 
         await fetchJobData();
@@ -1572,7 +1589,7 @@ const fetchTaskMaterials = async (taskId) => {
             {/* FITOUTOS / IMPORTED LABOUR AUTO ALLOCATE UI V1 */}
             <div className="mt-3 flex flex-col gap-2 rounded-lg border border-dashed p-3 md:flex-row md:items-center md:justify-between" data-testid="unmatched-labour-auto-allocate-panel">
               <p className="text-xs text-muted-foreground">
-                 Match imported Timesheet Manager labour to the single FitoutOS task using the same task code. This updates task actual hours only inside FitoutOS.
+                 Match imported Timesheet Manager labour first by exact task code, then by an approved labour mapping. This updates task actual hours only inside FitoutOS; unresolved rows remain unmatched.
               </p>
               <Button
                  type="button"
@@ -1588,6 +1605,64 @@ const fetchTaskMaterials = async (taskId) => {
           </CardContent>
         </Card>
       )}
+
+      {/* FITOUTOS / AUTO-MATCH RESULT SUMMARY UI V1 */}
+      {autoAllocateLabourResult && (
+        <Card
+          data-testid="auto-allocate-labour-result-summary"
+          aria-live="polite"
+        >
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+              Last Auto-match result
+            </CardTitle>
+            <CardDescription>
+              Result from the most recent deliberate Auto-match imported labour action.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="rounded-md border bg-muted/30 p-2">
+                <div className="text-[11px] text-muted-foreground">Total matched</div>
+                <div className="font-data text-base font-bold">
+                  {autoAllocateLabourResult.matched}
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-2">
+                <div className="text-[11px] text-muted-foreground">By task code</div>
+                <div className="font-data text-base font-bold">
+                  {autoAllocateLabourResult.matchedByTaskCode}
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-2">
+                <div className="text-[11px] text-muted-foreground">By approved mapping</div>
+                <div className="font-data text-base font-bold">
+                  {autoAllocateLabourResult.matchedByApprovedMapping}
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-2">
+                <div className="text-[11px] text-muted-foreground">Checked but unmatched</div>
+                <div className="font-data text-base font-bold">
+                  {autoAllocateLabourResult.unmatchedChecked}
+                </div>
+              </div>
+
+              <div className="col-span-2 rounded-md border bg-muted/30 p-2 sm:col-span-1">
+                <div className="text-[11px] text-muted-foreground">Remaining unmatched</div>
+                <div className="font-data text-base font-bold">
+                  {autoAllocateLabourResult.remaining}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* FITOUTOS / TIMESHEET LABOUR CSV IMPORT UI V1 */}
       {/* FITOUTOS / LABOUR MATCH MAPPING SUGGESTIONS REVIEW UI V1 */}
       <Card data-testid="labour-match-mapping-suggestions-panel">
@@ -1597,7 +1672,7 @@ const fetchTaskMaterials = async (taskId) => {
             <Badge variant="secondary">{labourMatchMappingSuggestions.length}</Badge>
           </CardTitle>
           <CardDescription>
-            Suggestions learned from manual labour matches. Review-only for now; they do not auto-apply.
+            Suggestions learned from manual labour matches. Approved suggestions may be reused only when a PM or administrator deliberately runs Auto-match imported labour.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1667,7 +1742,7 @@ const fetchTaskMaterials = async (taskId) => {
       <Card data-testid="timesheet-labour-import-panel">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Import Timesheet Labour</CardTitle>
-          <CardDescription>Import approved Timesheet Manager CSV rows into FitoutOS actual labour, then auto-match by job task code.</CardDescription>
+          <CardDescription>Import approved Timesheet Manager CSV rows into FitoutOS actual labour, then deliberately auto-match by exact task code or an approved labour mapping.</CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="flex flex-col gap-3 rounded-lg border border-dashed p-3 md:flex-row md:items-center md:justify-between">
