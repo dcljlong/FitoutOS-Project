@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -100,6 +100,8 @@ const TASK_STATUSES = [
 
 export default function JobDetailPage() {
   const { jobId } = useParams();
+  const location = useLocation();
+  const unmatchedLabourScrollKeyRef = useRef('');
   const { canManage } = useAuth();
   const [job, setJob] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -238,6 +240,42 @@ export default function JobDetailPage() {
   useEffect(() => {
     setAutoAllocateLabourResult(null);
   }, [jobId]);
+
+  // FITOUTOS / DASHBOARD UNMATCHED LABOUR DEEP LINK V1
+  useEffect(() => {
+    if (
+      loading ||
+      location.hash !== '#unmatched-labour' ||
+      unmatchedLabour.length === 0
+    ) {
+      return undefined;
+    }
+
+    const scrollKey = `${jobId}:${location.key}:${location.hash}`;
+
+    if (unmatchedLabourScrollKeyRef.current === scrollKey) {
+      return undefined;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const unmatchedLabourSection = document.getElementById('unmatched-labour');
+
+      if (!unmatchedLabourSection) {
+        return;
+      }
+
+      unmatchedLabourScrollKeyRef.current = scrollKey;
+      unmatchedLabourSection.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+      unmatchedLabourSection.focus({
+        preventScroll: true
+      });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [jobId, loading, location.hash, location.key, unmatchedLabour.length]);
 
   // FITOUTOS / PROGRAMME TASK SYNC BUTTON CLARITY V1
   // FITOUTOS / PROGRAMME TASK SYNC DISPLAY FALLBACK V1
@@ -1426,7 +1464,12 @@ const fetchTaskMaterials = async (taskId) => {
 
       {/* Progress Overview */}
       {(unmatchedLabourCount > 0 || unmatchedLabourHours > 0) && (
-        <Card>
+        <Card
+          id="unmatched-labour"
+          tabIndex={-1}
+          className="scroll-mt-6 focus:outline-none"
+          data-testid="unmatched-labour-section"
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Unmatched Labour</CardTitle>
             <CardDescription>Imported labour not yet linked to a task</CardDescription>

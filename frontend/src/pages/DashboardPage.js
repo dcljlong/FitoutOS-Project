@@ -105,6 +105,15 @@ export default function DashboardPage() {
       .join(' • ');
   };
 
+  // FITOUTOS / DASHBOARD UNMATCHED LABOUR DEEP LINK V1
+  const hasUnmatchedLabour = (codes) => (
+    Array.isArray(codes) &&
+    codes.some((code) => (
+      code?.task_code === 'No source task code (unmatched)' &&
+      Number(code?.hours || 0) > 0
+    ))
+  );
+
   if (loading) {
     return (
       <div className="space-y-4" data-testid="dashboard-page">
@@ -236,24 +245,52 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-2" data-testid="timesheet-labour-top-jobs">
-                  {labourTopRows.map((row) => (
-                    <div
-                      key={`${row.job_id || row.job_number}-${row.job_name || 'job'}`}
-                      className="flex flex-col gap-1 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-sm text-muted-foreground">{row.job_number || 'No job #'}</span>
-                          <span className="font-semibold">{row.job_name || 'Unnamed job'}</span>
+                  {labourTopRows.map((row) => {
+                    const rowHasUnmatchedLabour = hasUnmatchedLabour(row.task_codes);
+                    const jobRouteId = String(row.job_id || '').trim();
+
+                    return (
+                      <div
+                        key={`${row.job_id || row.job_number}-${row.job_name || 'job'}`}
+                        className="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm text-muted-foreground">{row.job_number || 'No job #'}</span>
+                            <span className="font-semibold">{row.job_name || 'Unnamed job'}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{formatTaskCodes(row.task_codes)}</p>
                         </div>
-                        <p className="text-xs text-muted-foreground">{formatTaskCodes(row.task_codes)}</p>
+
+                        <div className="flex items-center justify-between gap-3 md:justify-end">
+                          {jobRouteId && (
+                            <Link to={`/jobs/${jobRouteId}${rowHasUnmatchedLabour ? '#unmatched-labour' : ''}`}>
+                              <Button
+                                variant={rowHasUnmatchedLabour ? 'outline' : 'ghost'}
+                                size="sm"
+                                className="shrink-0"
+                                data-testid={rowHasUnmatchedLabour
+                                  ? 'timesheet-labour-review-unmatched'
+                                  : 'timesheet-labour-open-job'}
+                              >
+                                {rowHasUnmatchedLabour ? (
+                                  <AlertTriangle className="mr-2 h-4 w-4 text-amber-600" />
+                                ) : (
+                                  <FolderOpen className="mr-2 h-4 w-4" />
+                                )}
+                                {rowHasUnmatchedLabour ? 'Review unmatched' : 'Open job'}
+                              </Button>
+                            </Link>
+                          )}
+
+                          <div className="text-right">
+                            <div className="text-lg font-bold">{formatLabourHours(row.total_hours ?? row.actual_hours)}h</div>
+                            <div className="text-xs text-muted-foreground">actual labour</div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-left md:text-right">
-                        <div className="text-lg font-bold">{formatLabourHours(row.total_hours ?? row.actual_hours)}h</div>
-                        <div className="text-xs text-muted-foreground">actual labour</div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
