@@ -5157,7 +5157,21 @@ async def get_hours_by_job(user: dict = Depends(require_roles(UserRole.ADMIN, Us
         resolved_job_id = str(job.get("id") or job_id or "").strip()
         resolved_job_number = str(job.get("job_number") or job_number or "").strip()
         resolved_job_name = str(job.get("job_name") or job.get("name") or "").strip()
-        task_code = str(row.get("task_code") or row.get("task_code_id") or row.get("task_name") or "Uncoded").strip() or "Uncoded"
+
+        # FITOUTOS / DASHBOARD LABOUR ALLOCATION LABEL CLARITY V3
+        # Missing source task code and unmatched allocation are separate states.
+        source_task_code = str(row.get("task_code") or row.get("task_code_id") or "").strip()
+        matched_task_name = str(row.get("matched_task_name") or "").strip()
+        is_matched = bool(row.get("task_id"))
+
+        if source_task_code:
+            labour_group_label = source_task_code
+        elif is_matched and matched_task_name:
+            labour_group_label = f"Matched to {matched_task_name}"
+        elif is_matched:
+            labour_group_label = "Matched labour (no source task code)"
+        else:
+            labour_group_label = "No source task code (unmatched)"
 
         try:
             hours = float(row.get("hours") or row.get("actual_hours") or 0)
@@ -5178,7 +5192,7 @@ async def get_hours_by_job(user: dict = Depends(require_roles(UserRole.ADMIN, Us
         bucket["total_hours"] += hours
         bucket["actual_hours"] += hours
         bucket["row_count"] += 1
-        bucket["task_codes"][task_code] = bucket["task_codes"].get(task_code, 0.0) + hours
+        bucket["task_codes"][labour_group_label] = bucket["task_codes"].get(labour_group_label, 0.0) + hours
 
     results = []
     for bucket in buckets.values():

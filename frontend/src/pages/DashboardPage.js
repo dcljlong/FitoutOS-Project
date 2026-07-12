@@ -96,8 +96,9 @@ export default function DashboardPage() {
     return Number.isFinite(number) ? number.toFixed(1) : '0.0';
   };
 
+  // FITOUTOS / DASHBOARD LABOUR ALLOCATION LABEL CLARITY V3
   const formatTaskCodes = (codes) => {
-    if (!Array.isArray(codes) || codes.length === 0) return 'No task-code split yet';
+    if (!Array.isArray(codes) || codes.length === 0) return 'No labour allocation split yet';
     return codes
       .slice(0, 3)
       .map((code) => `${code.task_code}: ${formatLabourHours(code.hours)}h`)
@@ -210,7 +211,7 @@ export default function DashboardPage() {
         <Card className="xl:col-span-3" data-testid="timesheet-labour-dashboard-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-xl">Timesheet Labour</CardTitle>
-              <CardDescription>Approved labour imported from Timesheet Manager and grouped by FitoutOS job/task code</CardDescription>
+              <CardDescription>Approved labour imported from Timesheet Manager and grouped by source task code or matched FitoutOS task</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
